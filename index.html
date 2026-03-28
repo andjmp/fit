@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <title>Memorial Day Fitness Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    html,body{height:100%;background:#0a0a12}
+    input,select,textarea{font-size:16px!important;}
+    input[type=number]::-webkit-inner-spin-button{opacity:.4}
+    @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes slideUp{from{opacity:0;transform:translateY(40px)}to{opacity:1;transform:translateY(0)}}
+    .fade{animation:fadeUp .28s ease both}
+    .row-hover:hover{background:#13132a!important}
+    .pu-btn:active{transform:scale(.95)}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+const PU_WEEK_REPS = [8,10,12,14,16,18,20,22,25,28];
+
+function parseRestSecs(rest) {
+  if (!rest || rest === "—") return 0;
+  const m = rest.match(/(\d+)[\s–-]+(\d+)\s*min/);
+  if (m) return parseInt(m[1]) * 60;
+  const s = rest.match(/(\d+)\s*min/);
+  if (s) return parseInt(s[1]) * 60;
+  const sec = rest.match(/(\d+)\s*sec/);
+  if (sec) return parseInt(sec[1]);
+  return 0;
+}
+
+const LS = {
+  get(k){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):null; }catch(_){return null;} },
+  set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(_){} },
+};
+
+const EX_DETAILS = {
+  m1:  { sets:[{l:"Set 1",r:8},{l:"Set 2",r:8},{l:"Set 3",r:8},{l:"Set 4",r:8}], rest:"2–3 min", weight:"25 lb dumbbells", notes:"Stand feet shoulder-width. Press dumbbells overhead. Core tight, don't arch lower back. Lower to chin level." },
+  m2:  { sets:[{l:"Set 1",r:12},{l:"Set 2",r:12},{l:"Set 3",r:12}], rest:"60–90 sec", weight:"Chest fly machine", notes:"Wide arc, slight elbow bend. Lower until you feel the chest stretch. Squeeze at the top. Week 1: 70/100/70 lbs." },
+  m3:  { sets:[{l:"Set 1",r:"max"},{l:"Set 2",r:"max"},{l:"Set 3",r:"max"}], rest:"60–90 sec", weight:"Bodyweight", notes:"Lean forward slightly, elbows back not flared. Full range — lockout at top, 90° at bottom. Key muscle-up prep." },
+  m4:  { sets:[{l:"Set 1",r:15},{l:"Set 2",r:15},{l:"Set 3",r:15}], rest:"45–60 sec", weight:"Bodyweight", notes:"Back support on machine for now. Raise knees to chest, pause at top. No swinging. Progression toward full hanging raises." },
+  t1:  { sets:[], rest:"—", weight:"—", notes:"Check your 10K plan for this week's distance. Keep pace easy enough to hold a full conversation the whole run. If you can't, slow down." },
+  w1:  { sets:[{l:"Unassisted 1",r:"max"},{l:"Unassisted 2",r:"max"},{l:"Assisted 30 lb 1",r:8},{l:"Assisted 40 lb 2",r:8}], rest:"3 min", weight:"Bodyweight + 30/40 lb assist", notes:"Do unassisted sets first while fresh. Rest 3 min between ALL sets. Fill with assisted sets at 30–40 lbs. Always first in the workout." },
+  w2:  { sets:[{l:"Set 1",r:12},{l:"Set 2",r:12},{l:"Set 3",r:12}], rest:"60–90 sec", weight:"25 lbs", notes:"Neutral grip (palms facing each other). Full range. Keep elbows pinned to sides — don't swing." },
+  w3:  { sets:[{l:"Set 1",r:12},{l:"Set 2",r:12},{l:"Set 3",r:12}], rest:"60–90 sec", weight:"25 lbs", notes:"Supinated grip (palms up). Full range. Elbows stay pinned. Hammer curls are harder — don't be surprised if these feel easier." },
+  w4:  { sets:[{l:"Set 1",r:15},{l:"Set 2",r:15},{l:"Set 3",r:15}], rest:"45–60 sec", weight:"Bodyweight", notes:"Back support on machine for now. Pause at top. Progress toward free-hanging when sets feel easy." },
+  th1: { sets:[{l:"Set 1",r:8},{l:"Set 2",r:8},{l:"Set 3",r:8},{l:"Set 4",r:8}], rest:"2–3 min", weight:"15 lb dumbbells (build to 25–35 lbs)", notes:"Hip crease below knee at depth. Drive through heels. Keep chest up. Core fundamental for pistol squat strength." },
+  th2: { sets:[{l:"Set 1 (L)",r:10},{l:"Set 1 (R)",r:10},{l:"Set 2 (L)",r:10},{l:"Set 2 (R)",r:10},{l:"Set 3 (L)",r:10},{l:"Set 3 (R)",r:10}], rest:"90 sec", weight:"Bodyweight (build slowly)", notes:"Rear foot elevated. Front knee tracks toes. It's okay to rest hand on knee if needed. Hardest exercise in the plan — stay patient." },
+  th3: { sets:[{l:"Set 1",r:20},{l:"Set 2",r:20},{l:"Set 3",r:20},{l:"Set 4",r:20}], rest:"45–60 sec", weight:"30–40 lbs", notes:"Full range — all the way up on toes, all the way down. Slow lowering phase. Week 1: 30 lbs, last set 40 lbs." },
+  th4: { sets:[{l:"Set 1 (L)",r:5},{l:"Set 1 (R)",r:5},{l:"Set 2 (L)",r:5},{l:"Set 2 (R)",r:5},{l:"Set 3 (L)",r:5},{l:"Set 3 (R)",r:5}], rest:"60 sec", weight:"Bodyweight", notes:"Hold a rack post or TRX — more stable than a cane. Lower as deep as possible, keep heel down. Ankle mobility is the main limiter." },
+  f1:  { sets:[{l:"Set 1",r:"max"},{l:"Set 2",r:"max"},{l:"Set 3",r:"max"}], rest:"60–90 sec", weight:"Bodyweight", notes:"Full range every rep — lockout at top, 90° at bottom. Builds the push half of the muscle-up. Add weight later when bodyweight feels easy." },
+  f2:  { sets:[{l:"Set 1",r:8},{l:"Set 2",r:8},{l:"Set 3",r:8}], rest:"2–3 min", weight:"25 lb dumbbells", notes:"Strict form, no leg drive. Same as Monday but lower volume. Strength focus here." },
+  f3:  { sets:[{l:"Set 1",r:12},{l:"Set 2",r:12},{l:"Set 3",r:12}], rest:"60–90 sec", weight:"Chest fly machine", notes:"Same machine as Monday. Controlled stretch at bottom. Good chest finisher before skill work." },
+  f4:  { sets:[{l:"Set 1",r:"max"},{l:"Set 2",r:"max"},{l:"Set 3",r:"max"}], rest:"60 sec", weight:"Bodyweight", notes:"Do these early in the session before fatigue sets in. Back support for now, progress toward free-hanging. Mix full raises and knee raises as needed." },
+  f5:  { sets:[{l:"Attempt 1",r:1},{l:"Attempt 2",r:1},{l:"Attempt 3",r:1}], rest:"90 sec", weight:"Bodyweight", notes:"Wks 1–4: Explosive pull-ups, pull chest to bar. Wks 5–8: Negative muscle-ups — jump above bar, lower slowly through transition. Wks 9+: Band-assisted muscle-ups." },
+  s1:  { sets:[], rest:"—", weight:"—", notes:"Same distance as Tuesday. ~75% effort — comfortably hard, breathing but in control. You should be able to speak in short sentences." },
+  s2:  { sets:[], rest:"—", weight:"—", notes:"Hip flexor: kneeling lunge stretch. Hamstrings: standing fold. Ankles: wall ankle stretch. Ankle mobility is critical for pistol squat progress." },
+  s3:  { sets:[], rest:"—", weight:"—", notes:"Open the Progress tab and log this week's results: push-ups, pull-ups, dips, leg raises, weight, and run distance." },
+  su1: { sets:[], rest:"—", weight:"—", notes:"Muscles grow during rest, not during workouts. Protect your sleep. Recovery is training." },
+  su2: { sets:[], rest:"—", weight:"—", notes:"Easy 20–30 min walk. Keep heart rate low. Active recovery, not training." },
+};
+
+const WORKOUTS = {
+  Monday:    { label:"Push + Shoulders",      color:"#E67E22", skipPushups:true,
+    exercises:[{id:"m1",text:"Overhead Press"},{id:"m2",text:"Chest Fly Machine"},{id:"m3",text:"Dips — 3×max"},{id:"m4",text:"Leg Raises — machine back support"}]},
+  Tuesday:   { label:"Run Day 1",             color:"#3498DB",
+    exercises:[{id:"t1",text:"Easy conversational-pace run"}]},
+  Wednesday: { label:"Pull + Biceps",         color:"#E74C3C",
+    exercises:[{id:"w1",text:"Pull-Ups — FIRST"},{id:"w2",text:"Hammer Curls"},{id:"w3",text:"Regular Curls"},{id:"w4",text:"Leg Raises — machine back support"}]},
+  Thursday:  { label:"Legs",                  color:"#2ECC71",
+    exercises:[{id:"th1",text:"Squats"},{id:"th2",text:"Bulgarian Split Squat"},{id:"th3",text:"Calf Raises"},{id:"th4",text:"Pistol Squat Practice"}]},
+  Friday:    { label:"Upper Strength + Skill",color:"#9B59B6", skipPushups:true,
+    exercises:[{id:"w1",text:"Pull-Ups — FIRST"},{id:"f4",text:"Leg Raises"},{id:"f2",text:"Overhead Press"},{id:"f3",text:"Chest Fly Machine"},{id:"f5",text:"Muscle-Up Skill Practice"}]},
+  Saturday:  { label:"Run Day 2 + Mobility",  color:"#3498DB",
+    exercises:[{id:"s1",text:"Tempo Run"},{id:"s2",text:"Mobility Work"},{id:"s3",text:"⭐ Log Weekly Test Goals"}]},
+  Sunday:    { label:"Rest Day",              color:"#7F8C8D",
+    exercises:[{id:"su1",text:"Full Rest"},{id:"su2",text:"Light Walk (optional)"}]},
+};
+
+const WEEKS = Array.from({length:10},(_,i)=>({week:i+1,goals:{
+  run:      [1.5,2.0,2.5,3.0,3.5,4.0,4.5,5.0,5.5,6.2][i],
+  pushups:  [22,25,30,35,42,50,58,65,72,80][i],
+  pullups:  [5,6,6,7,8,9,10,10,11,12][i],
+  weight:   [150.5,151,151.5,152,152.5,153,154,154.5,155,156][i],
+  legraises:[10,11,12,13,14,15,16,17,18,20][i],
+  dips:     [5,6,7,8,9,10,11,12,13,15][i],
+}}));
+
+const METRICS = [
+  {key:"run",       label:"🏃 Run",       unit:"mi",  color:"#3498DB"},
+  {key:"pushups",   label:"💪 Push-Ups",  unit:"reps",color:"#E67E22"},
+  {key:"pullups",   label:"🏋️ Pull-Ups",  unit:"reps",color:"#E74C3C"},
+  {key:"weight",    label:"⚖️ Weight",     unit:"lbs", color:"#2ECC71"},
+  {key:"legraises", label:"🤸 Leg Raises", unit:"reps",color:"#9B59B6"},
+  {key:"dips",      label:"💪 Dips",       unit:"reps",color:"#1ABC9C"},
+];
+
+const LONG_TERM_GOALS = [
+  { icon:"🏋️", title:"Muscle-Up", eta:"6–9 months",
+    tip:"The pull side needs 12+ explosive reps before the transition is realistic. Dips build the push half. Friday skill practice every week is non-negotiable.",
+    phases:["Wks 1–4: Explosive pull-ups, chest to bar","Wks 5–8: Bar muscle-up negatives (jump above, lower slow)","Wks 9–12: Band-assisted muscle-ups","Wks 13+: First unassisted attempt"] },
+  { icon:"🦵", title:"Pistol Squat", eta:"3–5 months",
+    tip:"Ankle mobility is the hidden limiter — the Saturday stretch work matters as much as the Thursday practice. Bulgarian split squats are your best strength builder.",
+    phases:["Now: Assisted pistol to box or rack post","Wks 4–6: Assisted full depth (TRX/post)","Wks 7–9: Counterweight pistol (hold small plate)","Wks 10–12: Unassisted attempt"] },
+  { icon:"🤸", title:"Hanging Leg Raises to Arms", eta:"5–7 months",
+    tip:"You're currently on back-support machine. Transition to free-hanging once you can hit 15+ clean reps. The drop-off across sets means core endurance is the limiter — it improves fast.",
+    phases:["Now: Back-support machine raises","~Wk 4–5: Free-hanging knee raises","~Wk 6–8: Free-hanging full leg raises","~Wk 9–10: Toes-to-bar","~Wk 14–20: Full leg raises to arms"] },
+];
+
+const DAILY_TIPS = [
+  ["Rest day — use it. Muscles don't grow during workouts, they grow during recovery. Tonight's sleep matters more than any set you could do right now.","First Monday down. The hardest part of any program is showing up consistently in the first two weeks before it becomes habit. You're building that habit now.","On run days, the enemy is ego. Going too fast too early is the #1 reason people get shin splints and drop off. Embarrassingly slow is the right pace right now.","Your pull-up strength will feel disproportionately low compared to other lifts at first. That's normal — the movement pattern is new. The gains in weeks 3–6 will feel sudden.","Bulgarian split squats are humbling for everyone. If your balance is off, find a fixed surface for your rear foot instead of a padded bench — it's more stable.","Protein timing matters less than protein total. Don't stress about the post-workout window — just hit your 165g across the day however works for you.","First test day. Log your numbers honestly, even if they're below goal. Accurate data now means better decisions over the next 9 weeks."],
+  ["Week 2 rest day. Your body is adapting to new stress — you may feel more tired than week 1. That's the adaptation process working, not a sign you're overtrained.","Progressive overload is the whole game. If you lifted the same weight for the same reps as last week, you didn't get stronger — you maintained. Always try to add something.","Easy run pace check: if you finish your run feeling like you could have gone faster, you nailed it. If you're winded, you went too hard.","The drop-off in pull-up reps across sets is normal and expected. Focus on quality of movement, not matching your first set. Sets 3–4 being lower is fine.","Ankle mobility drill: stand facing a wall, place toes 3 inches away, and try to touch your knee to the wall without lifting your heel. Do 10 each side.","Eating enough is a skill, not just willpower. If you're under on calories, add an extra tablespoon of peanut butter or olive oil to meals — easy 100–120 calories with no extra volume.","Before logging today's results, do each test cold — don't warm up specifically for it. You want a consistent baseline each week."],
+  ["Two full weeks in. The soreness from new movements should be fading. That doesn't mean you're not working hard enough — it means your body has adapted to the stimulus.","This week try to add a small amount of weight or one extra rep to at least one exercise. Small wins compound dramatically over 10 weeks.","Midpoint of your 10K build. You're at 2.5 miles this week — exactly halfway to race distance. The second half of the build will feel easier than the first.","Pull-up tip: at the top of each rep, try to pull your elbows toward your hips rather than just pulling your chin over the bar. It recruits more lat and less arm.","If pistol squat practice feels stuck, check your ankle mobility first. 80% of pistol squat failures are ankle-related, not strength-related.","Sleep is your most underrated performance tool. One bad night won't hurt you, but chronic under-sleeping will stall your strength gains more than any training variable.","Week 3 test day. You should start seeing small improvements over week 1 baseline — even 1–2 reps improvement is meaningful progress."],
+  ["Rest. You're a month in. Take stock — you've built a real streak. Four weeks of consistent training is something most people never sustain.","Week 4 is often when training starts to feel routine rather than novel. That's actually ideal — you want it to feel like brushing your teeth, not a special event.","Tempo run tip: find a pace where you could sing but only one word at a time. That's your 75% effort sweet spot.","This week's pull-up goal steps up. If last week felt manageable, resist the urge to blast through sets — controlled, full-range reps build more strength than fast partial ones.","By now your squat form should be getting consistent. Focus on keeping your chest up and your weight through your whole foot, not just your toes.","Creatine is one of the most well-studied supplements for strength and muscle gain. If you're not taking it, 5g per day is worth considering — inexpensive and effective.","Halfway through the program. Your body composition has likely already shifted even if the scale hasn't caught up yet."],
+  ["Week 5 rest. You're in the middle stretch now — the initial excitement has worn off but you haven't reached the finish line yet. This is where character is built.","Double progression reminder: always try to hit all your target reps cleanly before adding weight. Chasing heavier weight with sloppy form is how progress stalls.","You've run over 20 miles total across this program so far. Your aerobic base is meaningfully stronger than it was 5 weeks ago.","If your pull-ups are feeling stronger, try pausing for 1 second at the top of each rep with your chin clearly over the bar. It makes every rep count more.","Bulgarian split squat tip: lean your torso slightly forward about 10–15 degrees. It shifts more load onto the glute and makes the movement more stable.","Hydration affects strength more than most people realize. Even mild dehydration reduces performance noticeably. Aim for a gallon on training days.","Five weeks of data in your tracker now. Look at the trend, not just this week's number. Consistent upward trends beat random big weeks every time."],
+  ["Six weeks in. Rest well. At this point your body has fundamentally adapted to the training stimulus — you're building on a real foundation now.","Week 6 is a good time to film yourself doing squats or pull-ups from the side. You'll catch form issues you can't feel — depth, bar path, elbow position.","Four miles on the run plan this week. You're at 65% of race distance. At this point the 10K is a question of when, not if.","If you're hitting 9 pull-up reps on your best set, start thinking about keeping 1–2 reps in the tank on set 1. You'll get more total volume across the session.","Pistol squat check-in: can you hold the bottom position for 5 seconds while holding support? If not, spend time just sitting in the bottom of a squat — great hip and ankle opener.","On high-protein days when eating feels like a chore, liquid calories help: whole milk, protein shakes, smoothies with nut butter. Easier to consume than solid food.","Six weeks of splits. Look at which goals are consistently green and which are red. If something is consistently behind, the goal may need adjustment — or the training does."],
+  ["Seven weeks down. Three to go. You can smell the finish line from here — but this is also when people start coasting. Don't.","At week 7, your body has largely adapted to the movement patterns. Now the gains come from progressive overload alone — weight, reps, or density. Pick one to push each session.","4.5 miles this week. One more mile and you could theoretically walk the second half of the 10K. You won't need to.","If you haven't already, try doing pull-ups with a 2-second pause at the dead hang between reps. Full extension at the bottom is a commonly skipped range of motion.","The Bulgarian split squat should be feeling significantly more manageable than week 1. That's real strength development — not just getting used to the discomfort.","Pre-workout meal timing: eating 60–90 minutes before training is the sweet spot for most people. Too close and you feel heavy; too far and you feel empty.","Week 7 test. You're 70% through the program. Your numbers should show a clear upward trend from week 1. If they don't, something in recovery or nutrition needs attention."],
+  ["Rest day, week 8. Two weeks left. Your Memorial Day fitness is essentially locked in at this point — the last two weeks are about peaking, not building.","This week focus on quality over quantity. Perfect reps matter more than grinding out ugly extras at this stage in the program.","Five miles this week. You're at 80% of race distance. This is your longest run of the program — take it slow and just finish it.","Pull-up volume is near its peak. Make sure you're eating enough — under-eating is the silent killer of strength progress in the final weeks.","If calf raises have been easy, try doing them on a step with full range of motion — heel drop below the step. Dramatically harder and more effective.","By now you should have a sense of which muscles are your weak links. Make a mental note — that's your post-Memorial Day training priority list writing itself.","Week 8 test. You're nearly there. The last two weeks of data will complete the picture of what 10 weeks of consistent work actually produces."],
+  ["Second-to-last rest day. Your body knows what it's doing now. Trust it.","Don't add new exercises or dramatically change anything this week. Consistency and execution quality are the only variables worth controlling now.","5.5 miles this week. If you finish Sunday's run, you can run a 10K. The rest is just race-day pacing.","Final push on pull-ups. Whatever your max unassisted set is right now is roughly where you'll be on Memorial Day — maintenance mode from here.","Pistol squat check: can you do an unassisted attempt yet? Even a wobbly one counts. The first one is always the hardest — after that the neural pathway opens up.","Taper your calories slightly this week if appetite is low — but keep protein high. Muscle isn't going anywhere in one week of slightly reduced calories.","Week 9 test. One more week. Your final numbers next Saturday will be your Memorial Day benchmark."],
+  ["Final rest day. You've done the work. Tomorrow is just showing up.","Last week. Don't do anything heroic — no new PRs, no extra sessions. Execute what you've been doing and let the results speak.","Taper week run: keep it short and easy. Save your legs for race day. The fitness is built — you can't add anything meaningful in 5 days.","Final pull-up session. Leave something in the tank. You want fresh arms for the test on Saturday.","Last leg day. Treat it like a maintenance session — don't grind. You need healthy joints for Memorial Day.","Race week nutrition: keep calories up, stay hydrated, don't try anything new. Familiar foods, good sleep, lots of water.","Memorial Day test day. You started 10 weeks ago. Whatever you log today is what 10 weeks of consistent work looks like. Be proud of showing up — the numbers are secondary."],
+];
+
+function getDailyTip(weekNumber) {
+  return DAILY_TIPS[Math.min(9,Math.max(0,weekNumber-1))][new Date().getDay()];
+}
+
+// ── Rest Timer ───────────────────────────────────────────────────────────────
+function RestTimer({ restStr, color }) {
+  const totalSecs = parseRestSecs(restStr);
+  const [state, setState] = useState("idle");
+  const [elapsed, setElapsed] = useState(0);
+  const intervalRef = useRef(null);
+  const start = () => { setState("running"); setElapsed(0); intervalRef.current = setInterval(()=>setElapsed(e=>{ if(e+1>=totalSecs){clearInterval(intervalRef.current);setState("done");return totalSecs;} return e+1; }),1000); };
+  const reset = () => { clearInterval(intervalRef.current); setState("idle"); setElapsed(0); };
+  useEffect(()=>()=>clearInterval(intervalRef.current),[]);
+  if (!totalSecs) return <div style={RT.row}><span style={RT.label}>REST</span><span style={{...RT.val,color:"#666680"}}>—</span></div>;
+  const pct=elapsed/totalSecs, remaining=totalSecs-elapsed, mins=Math.floor(remaining/60), secs=remaining%60;
+  const timeStr=mins>0?`${mins}:${secs.toString().padStart(2,"0")}`:remaining+"s";
+  return (
+    <button onClick={state==="idle"?start:reset} style={{...RT.btn,overflow:"hidden",position:"relative"}}>
+      {state!=="idle"&&<div style={{position:"absolute",left:0,top:0,bottom:0,width:`${pct*100}%`,background:state==="done"?color:"#E67E22",transition:state==="running"?"width 1s linear":"none",borderRadius:8}}/>}
+      <span style={{...RT.label,position:"relative",zIndex:1}}>REST</span>
+      <span style={{...RT.val,position:"relative",zIndex:1,color:color,fontWeight:state==="done"?900:700}}>
+        {state==="idle"?restStr:state==="done"?"✓ done":timeStr}
+      </span>
+    </button>
+  );
+}
+const RT={row:{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#0a0a18",borderRadius:8,padding:"10px 14px",marginBottom:14},btn:{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#141428",borderRadius:8,padding:"10px 14px",marginBottom:14,width:"100%",border:"none",cursor:"pointer"},label:{fontSize:9,letterSpacing:2,color:"#444",fontWeight:600},val:{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:700}};
+
+// ── Overlay ──────────────────────────────────────────────────────────────────
+function ExOverlay({ex,workout,repChecked,onRepCheck,onClose,onAllDone}) {
+  const d=EX_DETAILS[ex.id]; if(!d) return null;
+  const totalSets=d.sets.length;
+  const allSetsDone=totalSets>0&&d.sets.every((_,si)=>repChecked[`${ex.id}_s${si}`]);
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={onClose}>
+      <div style={{background:"#0f0f1e",borderRadius:"16px 16px 0 0",width:"100%",maxWidth:560,maxHeight:"88vh",overflowY:"auto",animation:"slideUp .25s ease both"}} onClick={e=>e.stopPropagation()}>
+        <div style={{height:4,background:workout.color,borderRadius:"16px 16px 0 0"}}/>
+        <div style={{padding:"16px 18px 40px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+            <div>
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:700,color:"#fff",lineHeight:1.2}}>{ex.text}</div>
+              <div style={{fontSize:10,color:"#666680",letterSpacing:1,marginTop:2}}>{workout.label}</div>
+            </div>
+            <button onClick={onClose} style={{background:"#1a1a2e",border:"none",borderRadius:"50%",width:30,height:30,color:"#666",fontSize:14,cursor:"pointer",flexShrink:0}}>✕</button>
+          </div>
+          {d.weight&&d.weight!=="—"&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#14120a",border:"1px solid #2a2200",borderRadius:8,padding:"10px 14px",marginBottom:12}}><span style={{fontSize:9,letterSpacing:2,color:"#444",fontWeight:600}}>WEIGHT / RESISTANCE</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:"#F1C40F"}}>{d.weight}</span></div>}
+          <div style={{fontSize:12,color:"#aaaaaa",lineHeight:1.6,background:"#080810",borderRadius:8,padding:"10px 12px",marginBottom:14}}>{d.notes}</div>
+          <RestTimer restStr={d.rest} color={workout.color}/>
+          {totalSets>0&&(
+            <div style={{marginBottom:14}}>
+              <div style={{fontSize:9,letterSpacing:2,color:"#444",fontWeight:600,marginBottom:8}}>SETS — {d.sets.filter((_,si)=>repChecked[`${ex.id}_s${si}`]).length}/{totalSets} done</div>
+              {d.sets.map((s,si)=>{
+                const key=`${ex.id}_s${si}`,done=!!repChecked[key];
+                return <button key={si} onClick={()=>onRepCheck(key)} style={{display:"flex",alignItems:"center",gap:12,width:"100%",background:done?"#0d2a1a":"#0a0a18",border:`1px solid ${done?workout.color:"#1e1e35"}`,borderRadius:8,padding:"11px 14px",marginBottom:6,cursor:"pointer",transition:"all .15s"}}>
+                  <div style={{width:20,height:20,borderRadius:5,flexShrink:0,background:done?workout.color:"transparent",border:`2px solid ${done?workout.color:"#2e2e4e"}`,display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s"}}>{done&&<span style={{color:"#fff",fontSize:10,fontWeight:700}}>✓</span>}</div>
+                  <span style={{flex:1,textAlign:"left",fontSize:13,color:done?"#5a5a6a":"#ccc",textDecoration:done?"line-through":"none"}}>{s.l}</span>
+                  <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:done?"#3a3a5a":workout.color}}>{s.r}{typeof s.r==="number"?" reps":""}</span>
+                </button>;
+              })}
+            </div>
+          )}
+          <button onClick={()=>{onAllDone(ex.id);onClose();}} style={{width:"100%",padding:"13px",borderRadius:10,border:"none",background:allSetsDone?workout.color:"#1e1e35",color:allSetsDone?"#fff":"#aaaaaa",fontFamily:"'IBM Plex Mono',monospace",fontSize:13,fontWeight:600,cursor:"pointer",transition:"all .2s"}}>{allSetsDone?"✓ Mark Complete":"Mark Complete"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Main App ─────────────────────────────────────────────────────────────────
+function App() {
+  const today=DAYS[new Date().getDay()], isSaturday=today==="Saturday";
+  const todayKey=new Date().toISOString().slice(0,10);
+  const [tab,setTab]=useState(isSaturday?"progress":"today");
+  const [checked,setChecked]=useState({});
+  const [repChecked,setRepChecked]=useState({});
+  const [actuals,setActuals]=useState({});
+  const [currentWeek,setCurrentWeek]=useState(()=>{ const fs=new Date("2026-03-23"),now=new Date(); if(now<fs)return 1; return Math.min(10,Math.max(2,Math.floor((now-fs)/(7*24*60*60*1000))+2)); });
+  const [puSets,setPuSets]=useState(0);
+  const [graphMetric,setGraphMetric]=useState("pushups");
+  const [saveStatus,setSaveStatus]=useState("");
+  const [overlay,setOverlay]=useState(null);
+  const holdTimer=useRef(null);
+  const loaded=useRef(false);
+
+  useEffect(()=>{
+    const a=LS.get("ft_actuals"); if(a) setActuals(a);
+    const d=LS.get("ft_daily_"+todayKey);
+    if(d){ if(d.checked)setChecked(d.checked); if(d.repChecked)setRepChecked(d.repChecked); if(d.puSets!==undefined)setPuSets(d.puSets); }
+    loaded.current=true;
+  },[]);
+
+  useEffect(()=>{ if(!loaded.current)return; if(Object.keys(actuals).length===0)return; setSaveStatus("saving"); const t=setTimeout(()=>{ LS.set("ft_actuals",actuals); setSaveStatus("saved"); setTimeout(()=>setSaveStatus(""),1800); },600); return()=>clearTimeout(t); },[actuals]);
+
+  useEffect(()=>{ if(!loaded.current)return; const t=setTimeout(()=>{ LS.set("ft_daily_"+todayKey,{checked,repChecked,puSets}); },400); return()=>clearTimeout(t); },[checked,repChecked,puSets]);
+
+  const workout=WORKOUTS[today], puTarget=PU_WEEK_REPS[currentWeek-1];
+  const doneCount=workout.exercises.filter(e=>checked[e.id]).length;
+  const allDone=doneCount===workout.exercises.length&&(workout.skipPushups||puSets>=5);
+
+  const setActual=(wk,key,val)=>setActuals(p=>({...p,[wk]:{...(p[wk]||{}),[key]:val===""?undefined:parseFloat(val)}}));
+  const getDiff=(wk,key)=>{const a=actuals[wk]?.[key];return a===undefined?null:a-WEEKS[wk-1].goals[key];};
+  const fmtDiff=(diff,key)=>{if(diff===null)return"—";const d=key==="run"||key==="weight"?1:0;return`${diff>=0?"+":""}${diff.toFixed(d)}`;};
+  const diffColor=diff=>diff===null?"#555":diff>=0?"#2ECC71":"#E74C3C";
+  const diffBg=diff=>diff===null?"#1a1a2a":diff>=0?"#0d2a1a":"#2a0d0d";
+  const diffBorder=diff=>diff===null?"#333":diff>=0?"#2ECC71":"#E74C3C";
+
+  const startHold=id=>{holdTimer.current=setTimeout(()=>setOverlay(id),450);};
+  const endHold=()=>clearTimeout(holdTimer.current);
+
+  const markAllSetsDone=exId=>{ const d=EX_DETAILS[exId]; if(!d)return; setChecked(p=>({...p,[exId]:true})); if(d.sets.length>0){const u={};d.sets.forEach((_,si)=>{u[`${exId}_s${si}`]=true;});setRepChecked(p=>({...p,...u}));} };
+
+  useEffect(()=>{ workout.exercises.forEach(ex=>{ const d=EX_DETAILS[ex.id]; if(!d||d.sets.length===0)return; if(d.sets.every((_,si)=>repChecked[`${ex.id}_s${si}`])&&!checked[ex.id])setChecked(p=>({...p,[ex.id]:true})); }); },[repChecked]);
+
+  const overlayEx=overlay?workout.exercises.find(e=>e.id===overlay):null;
+  const tomorrowDay=DAYS[(new Date().getDay()+1)%7], tomorrowWorkout=WORKOUTS[tomorrowDay];
+
+  const S={
+    root:{minHeight:"100vh",background:"#0a0a12",fontFamily:"'IBM Plex Mono',monospace",color:"#e8e8f0"},
+    header:{position:"sticky",top:0,zIndex:10,background:"rgba(10,10,18,.97)",backdropFilter:"blur(12px)",borderBottom:"1px solid #1a1a2e",padding:"14px 16px 0"},
+    body:{padding:"18px 14px 48px",maxWidth:560,margin:"0 auto"},
+  };
+
+  return (
+    <div style={S.root}>
+      {overlayEx&&<ExOverlay ex={overlayEx} workout={workout} repChecked={repChecked} onRepCheck={key=>setRepChecked(p=>({...p,[key]:!p[key]}))} onClose={()=>setOverlay(null)} onAllDone={markAllSetsDone}/>}
+
+      <div style={S.header}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+          <div>
+            <div style={{display:"flex",alignItems:"center",gap:8,fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:900,letterSpacing:3,color:"#fff"}}><span style={{fontSize:20,filter:"drop-shadow(0 0 8px #E67E22)"}}>⚡</span>MEMORIAL DAY</div>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,letterSpacing:4,color:"#333",marginTop:2,paddingLeft:28}}>FITNESS TRACKER · 10 WEEKS</div>
+          </div>
+          <div style={{textAlign:"right"}}>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:12,fontWeight:700,letterSpacing:3,color:"#E67E22"}}>{today.toUpperCase()}</div>
+            <div style={{fontSize:10,color:"#444",marginTop:2}}>{new Date().toLocaleDateString("en-US",{month:"short",day:"numeric"})}</div>
+          </div>
+        </div>
+        <div style={{display:"flex"}}>
+          {[["today","Today's Workout"],["progress",`Progress${isSaturday?" ⭐":""}`],["goals","Goals & Plans"]].map(([id,label])=>(
+            <button key={id} onClick={()=>setTab(id)} style={{flex:1,padding:"10px 6px",background:"transparent",border:"none",borderBottom:tab===id?"2px solid #E67E22":"2px solid transparent",color:tab===id?"#e8e8f0":"#444",fontFamily:"'IBM Plex Mono',monospace",fontSize:10,fontWeight:500,cursor:"pointer",letterSpacing:.5,transition:"all .2s"}}>{label}</button>
+          ))}
+        </div>
+      </div>
+
+      <div style={S.body}>
+
+        {/* TODAY */}
+        {tab==="today"&&<div className="fade">
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:18,flexWrap:"wrap"}}>
+            <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:11,fontWeight:900,letterSpacing:3,padding:"3px 9px",borderRadius:4,color:"#fff",background:workout.color}}>{today.toUpperCase()}</span>
+            <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:700,letterSpacing:1,color:"#fff"}}>{workout.label}</span>
+          </div>
+          {allDone&&<div style={{background:"linear-gradient(90deg,#0d2a1a,#1a3d28)",border:"1px solid #2ECC71",borderRadius:8,padding:"10px 14px",color:"#2ECC71",fontWeight:600,fontSize:13,letterSpacing:1,marginBottom:16}}>✓ Workout complete. Well done.</div>}
+          <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
+            {workout.exercises.map((ex,i)=>{
+              const d=EX_DETAILS[ex.id];
+              const setsTotal=d?.sets.length||0, setsDone=d?.sets.filter((_,si)=>repChecked[`${ex.id}_s${si}`]).length||0;
+              return <div key={ex.id} className="fade"
+                style={{display:"flex",alignItems:"center",gap:10,background:checked[ex.id]?"#0a0e0a":"#0f0f1e",border:`1px solid ${checked[ex.id]?"#1a2a1a":"#1e1e35"}`,borderRadius:8,padding:"11px 12px",width:"100%",transition:"all .15s",userSelect:"none",animationDelay:`${i*50}ms`}}
+                onTouchStart={()=>startHold(ex.id)} onTouchEnd={endHold} onTouchMove={endHold}
+                onMouseDown={()=>startHold(ex.id)} onMouseUp={endHold} onMouseLeave={endHold}>
+                <button onClick={e=>{e.stopPropagation();setChecked(p=>({...p,[ex.id]:!p[ex.id]}));}} style={{width:22,height:22,borderRadius:6,flexShrink:0,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s",background:checked[ex.id]?workout.color:"#0f0f1e",border:`2px solid ${checked[ex.id]?workout.color:"#2e2e4e"}`}}>
+                  {checked[ex.id]&&<span style={{color:"#fff",fontSize:12,fontWeight:700,lineHeight:1}}>✓</span>}
+                </button>
+                <div style={{flex:1,minWidth:0}} onClick={()=>setChecked(p=>({...p,[ex.id]:!p[ex.id]}))}>
+                  <div style={{fontSize:13,lineHeight:1.4,color:checked[ex.id]?"#55556a":"#c8c8d8",textDecoration:checked[ex.id]?"line-through":"none"}}>{ex.text}</div>
+                  <div style={{display:"flex",gap:8,alignItems:"center",marginTop:2}}>
+                    {d?.sets.length>0&&<span style={{fontSize:9,color:"#666680",letterSpacing:.5}}>{d.sets.length}×{d.sets[0].r}</span>}
+                    {d?.weight&&d.weight!=="—"&&d.weight!=="Bodyweight"&&<span style={{fontSize:9,color:"#5a5020",letterSpacing:.3}}>· {d.weight}</span>}
+                    {setsTotal>0&&setsDone>0&&<span style={{fontSize:9,color:setsDone===setsTotal?"#2ECC71":"#4a6a4a",letterSpacing:.5}}>{setsDone}/{setsTotal}</span>}
+                  </div>
+                </div>
+                <button onClick={()=>setOverlay(ex.id)} style={{background:"#1a1a2e",border:"none",borderRadius:6,color:"#666680",width:28,height:28,fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,paddingBottom:1}}>›</button>
+              </div>;
+            })}
+          </div>
+          <div style={{fontSize:10,color:"#2a2a3a",textAlign:"center",marginBottom:16,letterSpacing:.5}}>Tap › for details + rest timer · hold to open</div>
+          <div style={{marginBottom:24}}>
+            <div style={{fontSize:11,color:"#666680",letterSpacing:1,marginBottom:5}}>{doneCount} / {workout.exercises.length} complete</div>
+            <div style={{height:4,background:"#1a1a2e",borderRadius:2,overflow:"hidden"}}><div style={{height:"100%",borderRadius:2,transition:"width .4s ease",width:`${(doneCount/workout.exercises.length)*100}%`,background:workout.color}}/></div>
+          </div>
+          {/* Push-up tracker */}
+          <div style={{background:"#0f0f1e",border:"1px solid #2a1e0e",borderRadius:12,padding:16,marginBottom:16}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14,gap:10}}>
+              <div>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:17,fontWeight:700,letterSpacing:1,color:"#E67E22",marginBottom:3}}>💪 Daily Push-Up Practice</div>
+                <div style={{fontSize:11,color:"#666",lineHeight:1.4}}>{workout.skipPushups?"⚠️ Skip today — push day conflicts":`${puTarget} reps per set · never to failure · Week ${currentWeek}`}</div>
+              </div>
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:900,padding:"4px 12px",borderRadius:8,letterSpacing:1,flexShrink:0,background:puSets>=5?"#0d2a1a":"#1a1a2e",border:`1px solid ${puSets>=5?"#2ECC71":"#2e2e4e"}`,color:puSets>=5?"#2ECC71":"#888"}}>{puSets}/5</div>
+            </div>
+            {!workout.skipPushups&&<>
+              <div style={{display:"flex",gap:10,justifyContent:"center",margin:"4px 0 6px"}}>
+                {[1,2,3,4,5].map(n=><button key={n} className="pu-btn" onClick={()=>setPuSets(s=>s>=n?n-1:n)} style={{width:48,height:48,borderRadius:12,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",transition:"all .15s",flexShrink:0,background:puSets>=n?"#E67E22":"#1a1a2e",border:`2px solid ${puSets>=n?"#E67E22":"#2e2e4e"}`,boxShadow:puSets>=n?"0 0 10px #E67E2260":"none"}}>
+                  {puSets>=n?<span style={{color:"#fff",fontSize:13,fontWeight:700}}>✓</span>:<span style={{color:"#3a3a5a",fontSize:12}}>{n}</span>}
+                </button>)}
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10}}>
+                <div style={{fontSize:11,color:"#666680"}}>{puSets===0?"Tap a dot when you finish a set":puSets<5?`${5-puSets} set${5-puSets!==1?"s":""} to go`:"✅ All 5 sets done!"}</div>
+                {puSets>0&&<button onClick={()=>setPuSets(0)} style={{background:"transparent",border:"1px solid #2e2e4e",borderRadius:5,color:"#666680",fontFamily:"'IBM Plex Mono',monospace",fontSize:10,padding:"3px 8px",cursor:"pointer"}}>Reset</button>}
+              </div>
+              <div style={{marginTop:10,fontSize:11,color:"#666680",background:"#0a0a18",borderRadius:6,padding:"7px 10px",lineHeight:1.5}}><span style={{color:"#E67E22",fontWeight:600}}>Week {currentWeek}:</span> {puTarget} reps × 5 sets <span style={{color:"#55556a"}}>· stop 3–4 short of failure</span></div>
+            </>}
+          </div>
+          {isSaturday&&<div style={{display:"flex",alignItems:"center",gap:12,background:"linear-gradient(90deg,#1a1500,#252000)",border:"1px solid #F1C40F",borderRadius:10,padding:"13px 14px",marginBottom:18,color:"#F1C40F",fontSize:13,marginTop:16}}>
+            <span style={{fontSize:20}}>⭐</span>
+            <div style={{flex:1}}><div style={{fontWeight:700,marginBottom:2}}>It's Saturday — Test Day!</div><div style={{fontSize:12,opacity:.85}}>Head to Progress to log results.</div></div>
+            <button onClick={()=>setTab("progress")} style={{background:"#F1C40F",color:"#0a0a00",border:"none",borderRadius:6,padding:"7px 12px",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,fontSize:11,cursor:"pointer",whiteSpace:"nowrap",marginLeft:"auto"}}>Log Now →</button>
+          </div>}
+        </div>}
+
+        {/* PROGRESS */}
+        {tab==="progress"&&<div className="fade">
+          {isSaturday&&<div style={{display:"flex",alignItems:"center",gap:12,background:"linear-gradient(90deg,#1a1500,#252000)",border:"1px solid #F1C40F",borderRadius:10,padding:"13px 14px",marginBottom:18,color:"#F1C40F",fontSize:13}}><span style={{fontSize:20}}>⭐</span><div><div style={{fontWeight:700}}>Saturday Test Day!</div><div style={{fontSize:12,opacity:.85}}>Green = ahead, Red = behind.</div></div></div>}
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#0f0f1e",border:"1px solid #1e1e35",borderRadius:10,padding:"12px 16px",marginBottom:18}}>
+            <button onClick={()=>setCurrentWeek(w=>Math.max(1,w-1))} style={{background:"#1e1e35",border:"none",borderRadius:6,color:"#e8e8f0",width:36,height:36,fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>‹</button>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:900,letterSpacing:3,color:"#fff"}}>WEEK {currentWeek} <span style={{opacity:.4,fontSize:13,fontWeight:400}}>of 10</span></div>
+            <button onClick={()=>setCurrentWeek(w=>Math.min(10,w+1))} style={{background:"#1e1e35",border:"none",borderRadius:6,color:"#e8e8f0",width:36,height:36,fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>›</button>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:22}}>
+            {METRICS.map(m=>{
+              const goal=WEEKS[currentWeek-1].goals[m.key],actual=actuals[currentWeek]?.[m.key],diff=getDiff(currentWeek,m.key);
+              return <div key={m.key} style={{background:"#0f0f1e",border:"1px solid #1e1e35",borderTop:`3px solid ${m.color}`,borderRadius:10,padding:14,display:"flex",flexDirection:"column",gap:6}}>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:12,fontWeight:700,letterSpacing:2,color:"#666"}}>{m.label}</div>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:700,color:m.color}}>{goal}<span style={{fontSize:11,opacity:.5,marginLeft:4}}>{m.unit}</span></div>
+                <input type="number" placeholder={m.key==="weight"?"Morning wt":"Actual"} value={actual??""} step={m.key==="run"||m.key==="weight"?"0.1":"1"} onChange={e=>setActual(currentWeek,m.key,e.target.value)} style={{background:"#14142a",border:"1px solid #2a2a4a",borderRadius:6,padding:"7px 10px",color:"#e8e8f0",fontFamily:"'IBM Plex Mono',monospace",fontSize:16,width:"100%",outline:"none"}}/>
+                <div style={{borderRadius:6,padding:"5px 10px",fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:700,letterSpacing:1,textAlign:"center",color:diffColor(diff),background:diffBg(diff),border:`1px solid ${diffBorder(diff)}`}}>{fmtDiff(diff,m.key)}{diff!==null&&<span style={{fontSize:10,marginLeft:3,opacity:.7}}>{m.unit}</span>}</div>
+              </div>;
+            })}
+          </div>
+          <div style={{marginTop:8}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase"}}>All Weeks</div>
+              <div style={{fontSize:10,color:saveStatus==="saved"?"#2ECC71":"#55556a",transition:"color .3s",fontFamily:"'IBM Plex Mono',monospace"}}>{saveStatus==="saving"&&"saving…"}{saveStatus==="saved"&&"✓ saved"}</div>
+            </div>
+            <div style={{overflowX:"auto",borderRadius:10,border:"1px solid #1e1e35"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                <thead><tr><th style={{padding:"10px 6px",background:"#0f0f1e",fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,fontWeight:700,letterSpacing:2,textAlign:"center",borderBottom:"1px solid #1e1e35",color:"#aaaaaa"}}>Wk</th>{METRICS.map(m=><th key={m.key} style={{padding:"10px 6px",background:"#0f0f1e",fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,fontWeight:700,letterSpacing:2,textAlign:"center",borderBottom:"1px solid #1e1e35",color:m.color}}>{m.key==="legraises"?"Legs":m.key==="pushups"?"Push":m.key==="pullups"?"Pull":m.key==="weight"?"Wt":m.key==="dips"?"Dips":"Run"}</th>)}</tr></thead>
+                <tbody>{WEEKS.map(({week,goals})=><tr key={week} className="row-hover" style={{background:week===currentWeek?"#0f0f22":"transparent",cursor:"pointer"}} onClick={()=>setCurrentWeek(week)}>
+                  <td style={{padding:"7px 6px",textAlign:"center",borderBottom:"1px solid #10101e",color:week===currentWeek?"#E67E22":"#aaaaaa",fontWeight:week===currentWeek?700:400}}>W{week}</td>
+                  {METRICS.map(m=>{const diff=getDiff(week,m.key),actual=actuals[week]?.[m.key];return<td key={m.key} style={{padding:"7px 6px",textAlign:"center",borderBottom:"1px solid #10101e"}}><div style={{fontSize:10,opacity:.4}}>{goals[m.key]}</div>{actual!==undefined&&<div style={{fontSize:12,fontWeight:700,color:diffColor(diff)}}>{fmtDiff(diff,m.key)}</div>}</td>;})}
+                </tr>)}</tbody>
+              </table>
+            </div>
+            <div style={{fontSize:11,color:"#666680",marginTop:8,textAlign:"center"}}>Tap any row to jump to that week</div>
+          </div>
+          {/* Chart */}
+          <div style={{marginTop:24}}>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase",marginBottom:12}}>Progress Chart</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:14}}>
+              {METRICS.map(m=><button key={m.key} onClick={()=>setGraphMetric(m.key)} style={{padding:"8px 4px",borderRadius:8,border:`1px solid ${graphMetric===m.key?m.color:"#1e1e35"}`,background:graphMetric===m.key?m.color+"18":"#0f0f1e",color:graphMetric===m.key?m.color:"#666680",fontFamily:"'IBM Plex Mono',monospace",fontSize:10,fontWeight:600,cursor:"pointer",transition:"all .15s",display:"flex",flexDirection:"column",alignItems:"center",gap:3,boxShadow:graphMetric===m.key?`0 0 12px ${m.color}30`:"none"}}><span style={{fontSize:14}}>{m.label.split(" ")[0]}</span><span style={{fontSize:9,opacity:.7,letterSpacing:.5}}>{m.label.split(" ").slice(1).join(" ").toUpperCase()}</span></button>)}
+            </div>
+            {(()=>{
+              const m=METRICS.find(x=>x.key===graphMetric);
+              const gv=WEEKS.map(w=>w.goals[graphMetric]),av=WEEKS.map(w=>actuals[w.week]?.[graphMetric]);
+              const hasA=av.some(v=>v!==undefined),all=[...gv,...av.filter(v=>v!==undefined)];
+              const minV=Math.min(...all)*0.92,maxV=Math.max(...all)*1.05;
+              const W=320,H=160,PL=36,PR=12,PT=12,PB=28,cW=W-PL-PR,cH=H-PT-PB;
+              const xOf=i=>PL+(i/(WEEKS.length-1))*cW, yOf=v=>PT+cH-((v-minV)/(maxV-minV))*cH;
+              const gp=gv.map((v,i)=>`${i===0?"M":"L"}${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(" ");
+              const ap=av.map((v,i)=>v!==undefined?{x:xOf(i),y:yOf(v),v,i}:null).filter(Boolean);
+              const al=ap.length>1?ap.map((p,i)=>`${i===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" "):null;
+              return <div style={{background:"#0a0a16",borderRadius:12,border:"1px solid #1a1a2e",padding:"12px 8px 8px",overflowX:"auto"}}>
+                <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:W,display:"block",margin:"0 auto"}}>
+                  {Array.from({length:5},(_,i)=>{const v=minV+(maxV-minV)*(i/4),y=yOf(v);return<g key={i}><line x1={PL} y1={y} x2={W-PR} y2={y} stroke="#1a1a2e" strokeWidth="1"/><text x={PL-4} y={y+4} textAnchor="end" fill="#3a3a5a" fontSize="8" fontFamily="monospace">{v.toFixed(m.key==="run"||m.key==="weight"?1:0)}</text></g>;})}
+                  {WEEKS.map(({week},i)=><text key={week} x={xOf(i)} y={H-6} textAnchor="middle" fill="#3a3a5a" fontSize="8" fontFamily="monospace">W{week}</text>)}
+                  <path d={gp} fill="none" stroke={m.color} strokeWidth="1.5" strokeDasharray="4,3" opacity="0.45"/>
+                  {gv.map((v,i)=><circle key={i} cx={xOf(i)} cy={yOf(v)} r="2.5" fill="#0a0a16" stroke={m.color} strokeWidth="1.5" opacity="0.5"/>)}
+                  {al&&<path d={al} fill="none" stroke={m.color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>}
+                  {ap.map(p=><g key={p.i}><circle cx={p.x} cy={p.y} r="4" fill={m.color} stroke="#0a0a16" strokeWidth="1.5"/><text x={p.x} y={p.y-8} textAnchor="middle" fill={m.color} fontSize="8" fontFamily="monospace" fontWeight="bold">{p.v.toFixed(m.key==="run"||m.key==="weight"?1:0)}</text></g>)}
+                  <line x1={xOf(currentWeek-1)} y1={PT} x2={xOf(currentWeek-1)} y2={H-PB} stroke="#E67E22" strokeWidth="1" strokeDasharray="2,2" opacity="0.4"/>
+                </svg>
+                <div style={{display:"flex",gap:16,justifyContent:"center",marginTop:6}}>
+                  <div style={{display:"flex",alignItems:"center",gap:5,fontSize:10,color:"#666680"}}><svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" stroke={m.color} strokeWidth="1.5" strokeDasharray="4,3" opacity="0.5"/></svg>Goal</div>
+                  <div style={{display:"flex",alignItems:"center",gap:5,fontSize:10,color:m.color}}><svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" stroke={m.color} strokeWidth="2.5"/></svg>Actual</div>
+                </div>
+                {!hasA&&<div style={{textAlign:"center",fontSize:10,color:"#55556a",marginTop:6}}>Log actuals on Saturdays to see your progress line</div>}
+              </div>;
+            })()}
+          </div>
+        </div>}
+
+        {/* GOALS */}
+        {tab==="goals"&&<div className="fade">
+          <div style={{background:"#0f0f1e",border:"1px solid #1e1e35",borderLeft:`3px solid ${tomorrowWorkout.color}`,borderRadius:12,padding:16,marginBottom:16}}>
+            <div style={{fontSize:9,letterSpacing:2,color:"#666680",marginBottom:6,fontWeight:600}}>UP NEXT — {tomorrowDay.toUpperCase()}</div>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:700,color:"#fff",marginBottom:8}}>{tomorrowWorkout.label}</div>
+            <div style={{display:"flex",flexDirection:"column",gap:4}}>
+              {tomorrowWorkout.exercises.map(ex=>{ const d=EX_DETAILS[ex.id]; return <div key={ex.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:12,color:"#aaaaaa"}}>{ex.text}</span>{d?.weight&&d.weight!=="—"&&<span style={{fontSize:10,color:"#F1C40F",opacity:.8}}>{d.weight}</span>}</div>; })}
+            </div>
+          </div>
+          <div style={{background:"#0a0a18",border:"1px solid #1e2a1e",borderRadius:12,padding:16,marginBottom:20}}>
+            <div style={{fontSize:9,letterSpacing:2,color:"#666680",fontWeight:600,marginBottom:8}}>💡 TODAY'S TIP</div>
+            <div style={{fontSize:13,color:"#c8c8d8",lineHeight:1.7}}>{getDailyTip(currentWeek)}</div>
+          </div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase",marginBottom:12}}>Long-Term Goals</div>
+          {LONG_TERM_GOALS.map((g,i)=><div key={i} style={{background:"#0f0f1e",border:"1px solid #1e1e35",borderRadius:12,padding:16,marginBottom:12}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:700,color:"#fff"}}>{g.icon} {g.title}</div>
+              <div style={{fontSize:10,background:"#1e1e35",color:"#aaaaaa",padding:"3px 9px",borderRadius:20,fontFamily:"'IBM Plex Mono',monospace",whiteSpace:"nowrap",marginLeft:8,marginTop:2}}>{g.eta}</div>
+            </div>
+            <div style={{fontSize:12,color:"#777",lineHeight:1.6,marginBottom:12,fontStyle:"italic"}}>{g.tip}</div>
+            <div style={{display:"flex",flexDirection:"column",gap:6}}>{g.phases.map((p,j)=><div key={j} style={{display:"flex",gap:10,alignItems:"flex-start"}}><span style={{width:6,height:6,borderRadius:"50%",background:"#E67E22",flexShrink:0,marginTop:5,display:"block"}}/><span style={{fontSize:12,color:"#aaaaaa",lineHeight:1.5}}>{p}</span></div>)}</div>
+          </div>)}
+        </div>}
+
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+</body>
+</html>
