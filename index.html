@@ -347,25 +347,34 @@ function App(){
   const lookupNutrition=async()=>{
     if(!nutInput.trim()) return;
     setNutLoading(true); setNutError("");
+    setNutError("");
     try{
       const res=await fetch("https://api.anthropic.com/v1/messages",{
         method:"POST",
-        headers:{"Content-Type":"application/json","anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+        headers:{
+          "Content-Type":"application/json",
+          "anthropic-version":"2023-06-01",
+          "anthropic-dangerous-direct-browser-access":"true"
+        },
         body:JSON.stringify({
-          model:"claude-sonnet-4-20250514",max_tokens:300,
-          system:`You are a nutrition database. Return ONLY a JSON object, no markdown, no explanation.
-Format: {"cal":number,"prot":number,"desc":"concise name"}
-Estimate total calories and protein in grams for the food or meal described. Be accurate for well-known fast food items. Never refuse.`,
+          model:"claude-sonnet-4-20250514",
+          max_tokens:300,
+          system:"Respond with ONLY a raw JSON object. No markdown, no backticks, no extra text. Format: {cal:NUMBER,prot:NUMBER,desc:STRING}",
           messages:[{role:"user",content:nutInput.trim()}],
         }),
       });
-      const data=await res.json();
-      const text=data.content?.[0]?.text||"";
-      const parsed=JSON.parse(text.replace(/```json|```/g,"").trim());
-      const entry={id:Date.now(),desc:parsed.desc||nutInput.trim(),cal:Math.round(parsed.cal),prot:Math.round(parsed.prot*10)/10,time:new Date().toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"})};
+      const rawText=await res.text();
+      const data=JSON.parse(rawText);
+      if(data.error) throw new Error(data.error.message);
+      const text=(data.content||[]).map(b=>b.type==="text"?b.text:"").join("").trim();
+      const jsonStart=text.indexOf("{");
+      const jsonEnd=text.lastIndexOf("}")+1;
+      if(jsonStart===-1) throw new Error("No JSON returned");
+      const parsed=JSON.parse(text.slice(jsonStart,jsonEnd));
+      const entry={id:Date.now(),desc:parsed.desc||nutInput.trim(),cal:Math.round(parsed.cal||0),prot:Math.round((parsed.prot||0)*10)/10,time:new Date().toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"})};
       setNutLog(prev=>[...prev,entry]);
       setNutInput("");
-    }catch(e){setNutError("Could not estimate — try being more specific (e.g. \"Wendy's Dave's Double meal with medium fries\")");}
+    }catch(e){setNutError("Error: "+e.message);}
     setNutLoading(false);
   };
 
@@ -406,7 +415,7 @@ Estimate total calories and protein in grams for the food or meal described. Be 
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
         <div>
           <div style={{display:"flex",alignItems:"center",gap:8,fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:900,letterSpacing:3,color:"#fff"}}>
-            <span style={{fontSize:20,filter:"drop-shadow(0 0 8px #E67E22)"}}>!</span>FITNESS TRACKER
+            <span style={{fontSize:20,filter:"drop-shadow(0 0 8px #E67E22)"}}>⚡</span>FITNESS TRACKER
           </div>
           <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,letterSpacing:4,color:"#333",marginTop:2,paddingLeft:28}}>10 WEEKS</div>
         </div>
