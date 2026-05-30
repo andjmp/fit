@@ -32,30 +32,151 @@
   <script type="text/babel">
 const { useState, useEffect, useRef } = React;
 
+// ── Constants ─────────────────────────────────────────────────────────────────
 const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
-const DAY_LABELS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
-const PU_WEEK_REPS = [8,10,12,14,16,18,20,22,25,28];
-const CAL_GOAL = 3100;
-const PROT_GOAL = 165;
+const DAY_SHORT = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const CAL_GOAL = 3100, PROT_GOAL = 165;
+const PU_WEEK_REPS = [8,10,12,14,16,18,20,22,25,28,30,32];
+const PROGRAM_START = new Date("2026-06-01");
 
-// ── Storage helpers ───────────────────────────────────────────────────────────
+// Week type: 1-3=strength, 4=run, 5-7=strength, 8=run, 9-11=strength, 12=run
+const isRunWeek = w => w === 4 || w === 8 || w === 12;
+
+// Run week distances by day index (0=Sun..6=Sat)
+const RUN_WEEK_DISTANCES = {0:"6k",1:"8k",2:null,3:"10k",4:"8k",5:null,6:"6k"};
+const RUN_WEEK_DIST_KM = {0:6,1:8,3:10,4:8,6:6};
+// Maintenance days in run week: Tue(2) and Fri(5)
+const isMaintenanceDay = dayIdx => dayIdx === 2 || dayIdx === 5;
+
+// ── Storage ───────────────────────────────────────────────────────────────────
 const LS = {
   get(k){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):null; }catch(_){return null;} },
   set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(_){} },
 };
+const dateKey = (d) => (d||new Date()).toISOString().slice(0,10);
 
-function dateKey(d){ return (d||new Date()).toISOString().slice(0,10); }
-function weekKey(w){ return `week_${w}`; }
-
-// ── Rest timer ────────────────────────────────────────────────────────────────
-function parseRestSecs(rest){
-  if(!rest||rest==="—") return 0;
-  const m=rest.match(/(\d+)[\s–-]+(\d+)\s*min/); if(m) return parseInt(m[1])*60;
-  const s=rest.match(/(\d+)\s*min/); if(s) return parseInt(s[1])*60;
-  const sec=rest.match(/(\d+)\s*sec/); if(sec) return parseInt(sec[1]);
-  return 0;
+// ── Week calculation ──────────────────────────────────────────────────────────
+function getCurrentWeek(){
+  const now = new Date();
+  if(now < PROGRAM_START) return 1;
+  return Math.min(12, Math.max(1, Math.floor((now - PROGRAM_START)/(7*24*60*60*1000))+1));
 }
 
+// ── Goals ─────────────────────────────────────────────────────────────────────
+// Baselines from week 7: pushups:28, pullups:7, weight:152, legraises:23, dips:10, run5k:29min
+const STRENGTH_WEEKS = [1,2,3,5,6,7,9,10,11]; // week numbers that are strength weeks
+const STRENGTH_WEEK_IDX = w => STRENGTH_WEEKS.indexOf(w); // 0-8
+
+const GOALS = {
+  pushups:   [28,29,30,31,32,33,34,35,36,38],
+  pullups:   [7,7,8,8,8,9,9,10,10,10],
+  weight:    [152,152.3,152.6,152.9,153.2,153.5,153.8,154.1,154.4,155],
+  legraises: [23,25,27,29,31,33,35,37,39,40],
+  dips:      [10,11,11,12,13,13,14,15,16,18],
+  run5k:     [29,28.5,28,27.5,27,26.5,26,25.5,25,24], // minutes, lower=better
+};
+
+// Get goal for a given week number (strength weeks only)
+function getGoal(metric, weekNum){
+  const idx = STRENGTH_WEEK_IDX(weekNum);
+  if(idx === -1) return null;
+  return GOALS[metric][Math.min(idx, GOALS[metric].length-1)];
+}
+
+// Run week goals (minutes per distance)
+const RUN_WEEK_GOALS = {
+  "6k":  [36,35,34,33], // weeks 4,8,12 + spare
+  "8k":  [48,47,46,45],
+  "10k": [60,58,56,54],
+};
+function getRunWeekGoal(dist, runWeekIdx){ // runWeekIdx 0,1,2 for weeks 4,8,12
+  return RUN_WEEK_GOALS[dist][Math.min(runWeekIdx, 2)];
+}
+function runWeekIndex(w){ return w===4?0:w===8?1:2; }
+
+// ── Exercise details ──────────────────────────────────────────────────────────
+const EX = {
+  ohp:   {sets:[{l:"Set 1",r:8},{l:"Set 2",r:8},{l:"Set 3",r:8},{l:"Set 4",r:8}],rest:"2–3 min",weight:"25 lb dumbbells",notes:"Press overhead, core tight. Don't arch lower back. Lower to chin level."},
+  fly:   {sets:[{l:"Set 1",r:12},{l:"Set 2",r:12},{l:"Set 3",r:12}],rest:"60–90 sec",weight:"70–100 lbs machine",notes:"Wide arc, slight elbow bend. Lower until you feel the stretch. Squeeze at the top."},
+  dips:  {sets:[{l:"Set 1",r:"max"},{l:"Set 2",r:"max"},{l:"Set 3",r:"max"}],rest:"60–90 sec",weight:"Bodyweight",notes:"Lean forward slightly, elbows back. Full range — lockout at top, 90° at bottom."},
+  legr:  {sets:[{l:"Set 1",r:15},{l:"Set 2",r:15},{l:"Set 3",r:15}],rest:"45–60 sec",weight:"Bodyweight",notes:"Back support on machine. Raise knees to chest, pause at top. No swinging."},
+  pull:  {sets:[{l:"Unassisted 1",r:"max"},{l:"Unassisted 2",r:"max"},{l:"Assisted 30 lb",r:8},{l:"Assisted 40 lb",r:8}],rest:"3 min",weight:"Bodyweight + assist",notes:"Unassisted sets first while fresh. 3 min rest between ALL sets. Fill with assisted sets."},
+  hcurl: {sets:[{l:"Set 1",r:12},{l:"Set 2",r:12},{l:"Set 3",r:12}],rest:"60–90 sec",weight:"25 lbs",notes:"Neutral grip. Full range. Elbows pinned — don't swing."},
+  curl:  {sets:[{l:"Set 1",r:12},{l:"Set 2",r:12},{l:"Set 3",r:12}],rest:"60–90 sec",weight:"25 lbs",notes:"Supinated grip. Full range. Elbows stay pinned."},
+  squat: {sets:[{l:"Set 1",r:8},{l:"Set 2",r:8},{l:"Set 3",r:8},{l:"Set 4",r:8}],rest:"2–3 min",weight:"15–25 lb dumbbells",notes:"Hip crease below knee. Drive through heels. Keep chest up."},
+  bss:   {sets:[{l:"Set 1 L",r:10},{l:"Set 1 R",r:10},{l:"Set 2 L",r:10},{l:"Set 2 R",r:10},{l:"Set 3 L",r:10},{l:"Set 3 R",r:10}],rest:"90 sec",weight:"Bodyweight",notes:"Rear foot elevated. Front knee tracks toes. Stay patient — hardest exercise in the plan."},
+  calf:  {sets:[{l:"Set 1",r:20},{l:"Set 2",r:20},{l:"Set 3",r:20},{l:"Set 4",r:20}],rest:"45–60 sec",weight:"30–40 lbs",notes:"Full range — all the way up, all the way down. Slow lowering phase."},
+  pistol:{sets:[{l:"Set 1 L",r:5},{l:"Set 1 R",r:5},{l:"Set 2 L",r:5},{l:"Set 2 R",r:5},{l:"Set 3 L",r:5},{l:"Set 3 R",r:5}],rest:"60 sec",weight:"Bodyweight",notes:"Hold rack post or TRX. Lower as deep as possible, heel down."},
+  lat:   {sets:[{l:"Set 1",r:15},{l:"Set 2",r:15},{l:"Set 3",r:15}],rest:"45–60 sec",weight:"15 lbs",notes:"Raise to shoulder height, elbows slightly bent. Don't swing or shrug."},
+  pushup:{sets:[{l:"Set 1",r:"max"},{l:"Set 2",r:"max"}],rest:"2 min",weight:"Bodyweight",notes:"Fresh max test. Exhale on the push. Full range, chest to floor. Record your best set in Progress."},
+  run5k: {sets:[],rest:"—",weight:"—",notes:"5k on treadmill. Track your time and log it in Progress. Aim for a consistent pace throughout."},
+};
+
+// Workouts by day for strength weeks
+const STRENGTH_WORKOUTS = {
+  Monday:    {label:"Push",           color:"#E67E22", skipPushups:true,
+    exercises:[{id:"ohp",text:"Overhead Press"},{id:"fly",text:"Chest Fly Machine"},{id:"dips",text:"Dips"},{id:"legr",text:"Leg Raises"}]},
+  Tuesday:   {label:"Run — 5k",       color:"#3498DB", isRun:true,
+    exercises:[{id:"run5k",text:"5k Treadmill Run"}]},
+  Wednesday: {label:"Rest",           color:"#7F8C8D", isRest:true,
+    exercises:[]},
+  Thursday:  {label:"Pull + Biceps",  color:"#E74C3C",
+    exercises:[{id:"pull",text:"Pull-Ups — FIRST"},{id:"hcurl",text:"Hammer Curls"},{id:"curl",text:"Regular Curls"},{id:"legr",text:"Leg Raises"}]},
+  Friday:    {label:"Legs",           color:"#2ECC71",
+    exercises:[{id:"squat",text:"Squats"},{id:"bss",text:"Bulgarian Split Squat"},{id:"calf",text:"Calf Raises"},{id:"pistol",text:"Pistol Squat Practice"}]},
+  Saturday:  {label:"Push — Max Day", color:"#E67E22", skipPushups:true, isMaxDay:true,
+    exercises:[{id:"ohp",text:"Overhead Press"},{id:"fly",text:"Chest Fly Machine"},{id:"dips",text:"Dips"},{id:"legr",text:"Leg Raises"},{id:"pushup",text:"Push-Ups — Max Test"}]},
+  Sunday:    {label:"Pull — Max Day", color:"#E74C3C", isMaxDay:true,
+    exercises:[{id:"pull",text:"Pull-Ups — Max Test"},{id:"hcurl",text:"Hammer Curls"},{id:"curl",text:"Regular Curls"},{id:"lat",text:"Lateral Raises"}]},
+};
+
+// Run week workouts
+function getRunWeekWorkout(dayIdx){
+  const dist = RUN_WEEK_DISTANCES[dayIdx];
+  if(dist){
+    return {label:`Run — ${dist}`, color:"#3498DB", isRun:true, runDist:dist,
+      exercises:[{id:`run${dist}`,text:`${dist} Treadmill Run`}]};
+  }
+  if(isMaintenanceDay(dayIdx)){
+    return {label:"Maintenance", color:"#9B59B6", isMaintenance:true,
+      exercises:[{id:"pull",text:"Pull-Ups"},{id:"dips",text:"Dips"}]};
+  }
+  return {label:"Rest", color:"#7F8C8D", isRest:true, exercises:[]};
+}
+
+// ── Metrics for progress tab ──────────────────────────────────────────────────
+const METRICS = [
+  {key:"run5k",     label:"Run 5k",     unit:"min", color:"#3498DB", lowerIsBetter:true},
+  {key:"pushups",   label:"Push-Ups",   unit:"reps",color:"#E67E22"},
+  {key:"pullups",   label:"Pull-Ups",   unit:"reps",color:"#E74C3C"},
+  {key:"weight",    label:"Weight",     unit:"lbs", color:"#2ECC71"},
+  {key:"legraises", label:"Leg Raises", unit:"reps",color:"#9B59B6"},
+  {key:"dips",      label:"Dips",       unit:"reps",color:"#1ABC9C"},
+];
+
+// ── Daily tips ────────────────────────────────────────────────────────────────
+const TIPS = [
+  "Rest day. Muscles grow during recovery. Sleep tonight matters more than any extra set.",
+  "Progressive overload is the whole game. Add one rep or a little weight to at least one exercise today.",
+  "5k tip: run the first half slower than feels necessary. Negative splits feel better than blowing up at mile 2.",
+  "Pull-up tip: pull your elbows toward your hips, not just your chin to the bar. More lat, less arm.",
+  "Bulgarian split squat: lean torso slightly forward. Shifts load to the glute and improves stability.",
+  "Protein timing matters less than total. Just hit 165g across the day however works.",
+  "Log your max reps today before fatigue sets in. Fresh numbers are the only honest numbers.",
+  "Dead hang after pull-up sets. Grip strength, shoulder decompression, and lat stretch all at once.",
+  "Exhale on the push. Inhale down, exhale up. Every exercise, every rep.",
+  "Single leg balance: stand on one leg while brushing teeth. Directly builds pistol squat stability.",
+  "Liquid calories help when eating feels like a chore. Shakes, whole milk, smoothies with nut butter.",
+  "Look at your week 1 numbers. The gap between then and now is real progress.",
+];
+
+// ── Rest Timer ────────────────────────────────────────────────────────────────
+function parseRestSecs(r){
+  if(!r||r==="—")return 0;
+  const m=r.match(/(\d+)[\s–-]+(\d+)\s*min/);if(m)return parseInt(m[1])*60;
+  const s=r.match(/(\d+)\s*min/);if(s)return parseInt(s[1])*60;
+  const sc=r.match(/(\d+)\s*sec/);if(sc)return parseInt(sc[1]);return 0;
+}
 function RestTimer({restStr,color}){
   const total=parseRestSecs(restStr);
   const [state,setState]=useState("idle");
@@ -64,108 +185,28 @@ function RestTimer({restStr,color}){
   const start=()=>{setState("running");setElapsed(0);iv.current=setInterval(()=>setElapsed(e=>{if(e+1>=total){clearInterval(iv.current);setState("done");return total;}return e+1;}),1000);};
   const reset=()=>{clearInterval(iv.current);setState("idle");setElapsed(0);};
   useEffect(()=>()=>clearInterval(iv.current),[]);
-  if(!total) return <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#0a0a18",borderRadius:8,padding:"10px 14px",marginBottom:14}}><span style={{fontSize:9,letterSpacing:2,color:"#444",fontWeight:600}}>REST</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:700,color:"#666680"}}>—</span></div>;
-  const pct=elapsed/total,rem=total-elapsed,mins=Math.floor(rem/60),secs=rem%60;
-  const ts=mins>0?`${mins}:${secs.toString().padStart(2,"0")}`:rem+"s";
-  return <button onClick={state==="idle"?start:reset} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#141428",borderRadius:8,padding:"10px 14px",marginBottom:14,width:"100%",border:"none",cursor:"pointer",overflow:"hidden",position:"relative"}}>
+  if(!total)return<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#0a0a18",borderRadius:8,padding:"10px 14px",marginBottom:14}}><span style={{fontSize:9,letterSpacing:2,color:"#444",fontWeight:600}}>REST</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:700,color:"#666680"}}>—</span></div>;
+  const pct=elapsed/total,rem=total-elapsed,mins=Math.floor(rem/60),secs=rem%60,ts=mins>0?`${mins}:${secs.toString().padStart(2,"0")}`:rem+"s";
+  return<button onClick={state==="idle"?start:reset} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#141428",borderRadius:8,padding:"10px 14px",marginBottom:14,width:"100%",border:"none",cursor:"pointer",overflow:"hidden",position:"relative"}}>
     {state!=="idle"&&<div style={{position:"absolute",left:0,top:0,bottom:0,width:`${pct*100}%`,background:state==="done"?color:"#E67E22",transition:state==="running"?"width 1s linear":"none",borderRadius:8}}/>}
     <span style={{fontSize:9,letterSpacing:2,color:"#444",fontWeight:600,position:"relative",zIndex:1}}>REST</span>
     <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:700,color:color,position:"relative",zIndex:1}}>{state==="idle"?restStr:state==="done"?"done":ts}</span>
   </button>;
 }
 
-// ── Exercise details ──────────────────────────────────────────────────────────
-const EX_DETAILS = {
-  m1:{sets:[{l:"Set 1",r:8},{l:"Set 2",r:8},{l:"Set 3",r:8},{l:"Set 4",r:8}],rest:"2–3 min",weight:"25 lb dumbbells",notes:"Stand feet shoulder-width. Press overhead. Core tight, don't arch lower back. Lower to chin level."},
-  m2:{sets:[{l:"Set 1",r:12},{l:"Set 2",r:12},{l:"Set 3",r:12}],rest:"60–90 sec",weight:"70–100 lbs on machine",notes:"Wide arc, slight elbow bend. Lower until you feel the chest stretch. Squeeze at the top."},
-  m3:{sets:[{l:"Set 1",r:"max"},{l:"Set 2",r:"max"},{l:"Set 3",r:"max"}],rest:"60–90 sec",weight:"Bodyweight",notes:"Lean forward slightly, elbows back not flared. Full range — lockout at top, 90° at bottom."},
-  m4:{sets:[{l:"Set 1",r:15},{l:"Set 2",r:15},{l:"Set 3",r:15}],rest:"45–60 sec",weight:"Bodyweight",notes:"Back support on machine for now. Raise knees to chest, pause at top. No swinging."},
-  t1:{sets:[],rest:"—",weight:"—",notes:"Keep pace easy enough to hold a full conversation the whole run. If you can't, slow down. Build distance week by week."},
-  w1:{sets:[{l:"Unassisted 1",r:"max"},{l:"Unassisted 2",r:"max"},{l:"Assisted 30 lb",r:8},{l:"Assisted 40 lb",r:8}],rest:"3 min",weight:"Bodyweight + 30/40 lb assist",notes:"Do unassisted sets first while fresh. Rest 3 min between ALL sets. Fill with assisted sets. Always first in the workout."},
-  w2:{sets:[{l:"Set 1",r:12},{l:"Set 2",r:12},{l:"Set 3",r:12}],rest:"60–90 sec",weight:"25 lbs",notes:"Neutral grip (palms facing each other). Full range. Keep elbows pinned — don't swing."},
-  w3:{sets:[{l:"Set 1",r:12},{l:"Set 2",r:12},{l:"Set 3",r:12}],rest:"60–90 sec",weight:"25 lbs",notes:"Supinated grip (palms up). Full range. Elbows stay pinned. Hammer curls are harder — don't be surprised if these feel easier."},
-  w4:{sets:[{l:"Set 1",r:15},{l:"Set 2",r:15},{l:"Set 3",r:15}],rest:"45–60 sec",weight:"Bodyweight",notes:"Back support on machine. Pause at top. Progress toward free-hanging when sets feel easy."},
-  th1:{sets:[{l:"Set 1",r:8},{l:"Set 2",r:8},{l:"Set 3",r:8},{l:"Set 4",r:8}],rest:"2–3 min",weight:"15–25 lb dumbbells",notes:"Hip crease below knee at depth. Drive through heels. Keep chest up."},
-  th2:{sets:[{l:"Set 1 L",r:10},{l:"Set 1 R",r:10},{l:"Set 2 L",r:10},{l:"Set 2 R",r:10},{l:"Set 3 L",r:10},{l:"Set 3 R",r:10}],rest:"90 sec",weight:"Bodyweight",notes:"Rear foot elevated. Front knee tracks toes. Hardest exercise in the plan — stay patient."},
-  th3:{sets:[{l:"Set 1",r:20},{l:"Set 2",r:20},{l:"Set 3",r:20},{l:"Set 4",r:20}],rest:"45–60 sec",weight:"30–40 lbs",notes:"Full range — all the way up on toes, all the way down. Slow lowering phase."},
-  th4:{sets:[{l:"Set 1 L",r:5},{l:"Set 1 R",r:5},{l:"Set 2 L",r:5},{l:"Set 2 R",r:5},{l:"Set 3 L",r:5},{l:"Set 3 R",r:5}],rest:"60 sec",weight:"Bodyweight",notes:"Hold rack post or TRX. Lower as deep as possible, keep heel down."},
-  f1:{sets:[{l:"Set 1",r:"max"},{l:"Set 2",r:"max"},{l:"Set 3",r:"max"}],rest:"60–90 sec",weight:"Bodyweight",notes:"Full range — lockout at top, 90° at bottom. Builds the push half of the muscle-up."},
-  f2:{sets:[{l:"Set 1",r:8},{l:"Set 2",r:8},{l:"Set 3",r:8}],rest:"2–3 min",weight:"25 lb dumbbells",notes:"Strict form, no leg drive. Strength focus."},
-  f3:{sets:[{l:"Set 1",r:12},{l:"Set 2",r:12},{l:"Set 3",r:12}],rest:"60–90 sec",weight:"70–100 lbs on machine",notes:"Controlled stretch at bottom. Good chest finisher before skill work."},
-  f4:{sets:[{l:"Set 1",r:"max"},{l:"Set 2",r:"max"},{l:"Set 3",r:"max"}],rest:"60 sec",weight:"Bodyweight",notes:"Do these while fresh. Back support for now, progress toward free-hanging. Mix full raises and knee raises as needed."},
-  f5:{sets:[{l:"Attempt 1",r:1},{l:"Attempt 2",r:1},{l:"Attempt 3",r:1}],rest:"90 sec",weight:"Bodyweight",notes:"Wks 1–4: Explosive pull-ups, chest to bar. Wks 5–8: Negative muscle-ups — jump above bar, lower slowly. Wks 9+: Band-assisted muscle-ups."},
-  s1:{sets:[],rest:"—",weight:"—",notes:"~75% effort — comfortably hard, breathing but in control. Same distance as Tuesday."},
-  s2:{sets:[],rest:"—",weight:"—",notes:"Hip flexors, hamstrings, ankle circles. 10 minutes minimum."},
-  s3:{sets:[],rest:"—",weight:"—",notes:"Open the Progress tab and log this week's results."},
-  su1:{sets:[],rest:"—",weight:"—",notes:"Muscles grow during rest, not during workouts. Protect your sleep."},
-  su2:{sets:[],rest:"—",weight:"—",notes:"Easy 20–30 min walk. Keep heart rate low."},
-};
-
-const WORKOUTS = {
-  Monday:   {label:"Push + Shoulders",     color:"#E67E22",skipPushups:true,
-    exercises:[{id:"m1",text:"Overhead Press"},{id:"m2",text:"Chest Fly Machine"},{id:"m3",text:"Dips"},{id:"m4",text:"Leg Raises"}]},
-  Tuesday:  {label:"Run Day 1",            color:"#3498DB",
-    exercises:[{id:"t1",text:"Easy run"}]},
-  Wednesday:{label:"Pull + Biceps",        color:"#E74C3C",
-    exercises:[{id:"w1",text:"Pull-Ups — FIRST"},{id:"w2",text:"Hammer Curls"},{id:"w3",text:"Regular Curls"},{id:"w4",text:"Leg Raises"}]},
-  Thursday: {label:"Legs",                 color:"#2ECC71",
-    exercises:[{id:"th1",text:"Squats"},{id:"th2",text:"Bulgarian Split Squat"},{id:"th3",text:"Calf Raises"},{id:"th4",text:"Pistol Squat Practice"}]},
-  Friday:   {label:"Upper Strength + Skill",color:"#9B59B6",skipPushups:true,
-    exercises:[{id:"w1",text:"Pull-Ups — FIRST"},{id:"f4",text:"Leg Raises"},{id:"f2",text:"Overhead Press"},{id:"f3",text:"Chest Fly Machine"},{id:"f5",text:"Muscle-Up Practice"}]},
-  Saturday: {label:"Run Day 2 + Mobility", color:"#3498DB",
-    exercises:[{id:"s1",text:"Tempo Run"},{id:"s2",text:"Mobility Work"},{id:"s3",text:"Log Weekly Test Goals"}]},
-  Sunday:   {label:"Rest Day",             color:"#7F8C8D",
-    exercises:[{id:"su1",text:"Full Rest"},{id:"su2",text:"Light Walk (optional)"}]},
-};
-
-// Updated realistic goals from actual data
-const WEEKS = Array.from({length:10},(_,i)=>({week:i+1,goals:{
-  run:      [1.5,2.0,2.5,3.0,3.5,4.0,4.5,5.0,5.5,6.2][i],
-  pushups:  [28,29,30,31,32,33,34,35,36,38][i],
-  pullups:  [7,7,8,8,8,9,9,10,10,10][i],
-  weight:   [152,152.5,153,153,153.5,154,154,154.5,155,155][i],
-  legraises:[23,24,26,28,30,32,34,36,38,40][i],
-  dips:     [10,11,11,12,13,13,14,15,16,18][i],
-}}));
-
-const METRICS=[
-  {key:"run",       label:"Run",        unit:"mi",  color:"#3498DB"},
-  {key:"pushups",   label:"Push-Ups",   unit:"reps",color:"#E67E22"},
-  {key:"pullups",   label:"Pull-Ups",   unit:"reps",color:"#E74C3C"},
-  {key:"weight",    label:"Weight",     unit:"lbs", color:"#2ECC71"},
-  {key:"legraises", label:"Leg Raises", unit:"reps",color:"#9B59B6"},
-  {key:"dips",      label:"Dips",       unit:"reps",color:"#1ABC9C"},
-];
-
-// Daily tips [weekIndex][dayIndex]
-const DAILY_TIPS=[
-  ["Rest day. Muscles grow during recovery, not during workouts. Tonight's sleep matters more than any extra set.","Progressive overload is the whole game. If you lifted the same weight for the same reps as last week, you maintained — not gained. Always try to add something small.","Easy run pace: if you finish feeling like you could have gone faster, you nailed it. If you're winded, you went too hard.","Pull-up tip: at the top of each rep, try to pull your elbows toward your hips rather than just pulling your chin to the bar. More lat, less arm.","Bulgarian split squat tip: lean your torso slightly forward about 10–15 degrees. Shifts more load to the glute and improves stability.","Protein timing matters less than protein total. Just hit your daily target however works for you.","Test day. Do push-up test fresh, before the gym. Wait 2–3 hours after gym before testing push-ups."],
-  ["Week 2. Your body is adapting to new stress — more tired than week 1 is normal. That's the adaptation process working.","Double progression: hit all target reps cleanly before adding weight. Chasing heavier weight with sloppy form is how progress stalls.","On run days, resist the urge to push pace. The aerobic base you're building now pays off in weeks 6–10.","The drop-off in pull-up reps across sets is expected. Quality over matching your first set. Sets 3–4 being lower is fine.","Ankle mobility drill: stand facing a wall, toes 3 inches away, touch knee to wall without heel lifting. 10 each side.","If you're under on calories, add a tablespoon of peanut butter or olive oil to a meal. Easy 100–120 calories with no extra volume.","Weigh yourself first thing in the morning, same conditions every week. That's your real number."],
-  ["Two weeks in. The initial soreness should be fading. That's adaptation, not a sign you're not working hard enough.","Try to add one extra rep or a small amount of weight to at least one exercise this week. Small wins compound over 10 weeks.","You're at 2.5 miles this week. Halfway to race distance. The second half of the build will feel easier than the first.","Dead hangs after pull-up sets build grip strength and decompress the spine. Keep doing them.","Pistol squat check: is the movement getting less wobbly? The first few weeks are mostly balance adaptation.","Sleep is your most underrated performance tool. Chronic under-sleeping stalls strength gains more than any training variable.","Look at your week 1 numbers and compare. Even 1–2 rep improvements are real progress."],
-  ["A month in. You've built a real streak. Four weeks of consistent training is something most people never sustain.","Week 4 is when training starts feeling routine rather than novel. That's ideal — you want it to feel automatic.","Tempo run tip: a pace where you could sing but only one word at a time is your 75% effort sweet spot.","Focus on full range of motion on pull-ups. Dead hang at the bottom, chin clearly over bar at the top. Partial reps build partial strength.","Your squat depth should be consistent by now. Focus on keeping weight through your whole foot, not just your toes.","Hydration affects strength more than most people realize. Even mild dehydration reduces performance noticeably.","Four weeks of data. Look at the trend, not just this week's number."],
-  ["Week 5. The initial excitement has worn off but you haven't reached the finish line. This is where consistency is built.","If daily push-up sets are feeling easier, that's the signal to increase reps, not to slack off.","You've run over 15 miles total across this program. Your aerobic base is meaningfully stronger than 5 weeks ago.","Scapular shrug warmup before pull-ups: hang from bar and pull shoulder blades down without bending elbows, 10 reps. Activates lats before arms take over.","The Bulgarian split squat should feel significantly more controlled than week 1. That's real strength.","Pre-workout meal: 60–90 minutes before is the sweet spot. Too close and you feel heavy; too far and you feel empty.","Five weeks of data. Consistent trends matter more than any single week's number."],
-  ["Six weeks in. You're building on a real foundation now.","Film yourself doing squats or pull-ups from the side this week. You'll catch form issues you can't feel.","Four miles this week. You're at 65% of full run distance. The 10K is a question of when, not if.","If pull-up reps are growing, start keeping 1–2 reps in reserve on set 1. More total volume across the session.","Single leg balance practice: stand on one leg while brushing teeth. Switch legs. It adds up.","Liquid calories help on days when eating feels like a chore — shakes, whole milk, smoothies with nut butter.","Six weeks of splits. Note which goals are consistently green and which are red. That's your focus area."],
-  ["Seven weeks. Three to go. This is when people start coasting. Don't.","Gains now come purely from progressive overload. Pick one variable to push each session — weight, reps, or density.","4.5 miles this week. One more mile and you could walk the second half of a 10K. You won't need to.","Try a 2-second pause at the dead hang between pull-up reps. Full extension at the bottom is a commonly skipped range.","Eyes-closed single leg balance: dramatically harder than eyes open. Trains proprioception directly relevant to pistol squats.","Exhale on the exertion phase of every exercise. Inhale on the way down, exhale on the push or pull.","Week 7 test. Your numbers should show a clear upward trend from week 1."],
-  ["Week 8. Two weeks left. Focus shifts from building to peaking.","Quality over quantity this week. Perfect reps matter more than grinding out ugly extras.","Five miles this week. Your longest run of the program — take it slow and just finish it.","Pull-up volume near its peak. Make sure you're eating enough — under-eating is the silent killer of late-program strength progress.","Try calf raises on a step with full heel drop below the step level. Dramatically harder and more effective.","You should have a clear sense of your weak links by now. That's your post-program priority list.","Week 8 test. Nearly there."],
-  ["Second-to-last rest day. Your body knows what it's doing now. Trust it.","Don't add new exercises this week. Consistency and execution quality are the only variables worth controlling now.","5.5 miles this week. If you finish this run, you can run a 10K.","Final push on pull-ups. Whatever your max unassisted set is right now is roughly your ceiling for the end of the program.","Pistol squat check: can you do an unassisted attempt? Even a wobbly one counts. The first one opens the neural pathway.","Keep protein high even if overall calories dip slightly. Muscle isn't going anywhere in one week of slightly lower calories.","One more week. Your final numbers next Saturday will be your benchmark for the next phase."],
-  ["Final rest day. You've done the work.","Last week. No heroics — execute what you've been doing and let the results speak.","Keep the run short and easy this week. Save your legs. The fitness is built.","Final pull-up session. Leave something in the tank for the end-of-program test.","Last leg day. Maintenance session — don't grind. Healthy joints matter for what comes next.","Eat well, stay hydrated, nothing new this week. Familiar foods, good sleep.","End of program test day. Whatever you log today is what 10 weeks of consistent work looks like."],
-];
-
-function getDailyTip(wk){ return DAILY_TIPS[Math.min(9,Math.max(0,wk-1))][new Date().getDay()]; }
-
 // ── Exercise overlay ──────────────────────────────────────────────────────────
-function ExOverlay({ex,workout,repChecked,onRepCheck,onClose,onAllDone}){
-  const d=EX_DETAILS[ex.id]; if(!d) return null;
+function ExOverlay({ex,color,label,repChecked,onRepCheck,onClose,onAllDone}){
+  const d=EX[ex.id]; if(!d)return null;
   const totalSets=d.sets.length;
   const allSetsDone=totalSets>0&&d.sets.every((_,si)=>repChecked[`${ex.id}_s${si}`]);
-  return <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={onClose}>
+  return<div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.8)",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={onClose}>
     <div style={{background:"#0f0f1e",borderRadius:"16px 16px 0 0",width:"100%",maxWidth:560,maxHeight:"88vh",overflowY:"auto",animation:"slideUp .25s ease both"}} onClick={e=>e.stopPropagation()}>
-      <div style={{height:4,background:workout.color,borderRadius:"16px 16px 0 0"}}/>
+      <div style={{height:4,background:color,borderRadius:"16px 16px 0 0"}}/>
       <div style={{padding:"16px 18px 40px"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
           <div>
             <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:700,color:"#fff",lineHeight:1.2}}>{ex.text}</div>
-            <div style={{fontSize:10,color:"#666680",letterSpacing:1,marginTop:2}}>{workout.label}</div>
+            <div style={{fontSize:10,color:"#666680",letterSpacing:1,marginTop:2}}>{label}</div>
           </div>
           <button onClick={onClose} style={{background:"#1a1a2e",border:"none",borderRadius:"50%",width:30,height:30,color:"#666",fontSize:14,cursor:"pointer",flexShrink:0}}>x</button>
         </div>
@@ -174,111 +215,114 @@ function ExOverlay({ex,workout,repChecked,onRepCheck,onClose,onAllDone}){
           <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:"#F1C40F"}}>{d.weight}</span>
         </div>}
         <div style={{fontSize:12,color:"#aaaaaa",lineHeight:1.6,background:"#080810",borderRadius:8,padding:"10px 12px",marginBottom:14}}>{d.notes}</div>
-        <RestTimer restStr={d.rest} color={workout.color}/>
+        <RestTimer restStr={d.rest} color={color}/>
         {totalSets>0&&<div style={{marginBottom:14}}>
           <div style={{fontSize:9,letterSpacing:2,color:"#444",fontWeight:600,marginBottom:8}}>SETS — {d.sets.filter((_,si)=>repChecked[`${ex.id}_s${si}`]).length}/{totalSets} done</div>
           {d.sets.map((s,si)=>{
             const key=`${ex.id}_s${si}`,done=!!repChecked[key];
-            return <button key={si} onClick={()=>onRepCheck(key)} style={{display:"flex",alignItems:"center",gap:12,width:"100%",background:done?"#0d2a1a":"#0a0a18",border:`1px solid ${done?workout.color:"#1e1e35"}`,borderRadius:8,padding:"11px 14px",marginBottom:6,cursor:"pointer",transition:"all .15s"}}>
-              <div style={{width:20,height:20,borderRadius:5,flexShrink:0,background:done?workout.color:"transparent",border:`2px solid ${done?workout.color:"#2e2e4e"}`,display:"flex",alignItems:"center",justifyContent:"center"}}>{done&&<span style={{color:"#fff",fontSize:10,fontWeight:700}}>v</span>}</div>
+            return<button key={si} onClick={()=>onRepCheck(key)} style={{display:"flex",alignItems:"center",gap:12,width:"100%",background:done?"#0d2a1a":"#0a0a18",border:`1px solid ${done?color:"#1e1e35"}`,borderRadius:8,padding:"11px 14px",marginBottom:6,cursor:"pointer",transition:"all .15s"}}>
+              <div style={{width:20,height:20,borderRadius:5,flexShrink:0,background:done?color:"transparent",border:`2px solid ${done?color:"#2e2e4e"}`,display:"flex",alignItems:"center",justifyContent:"center"}}>{done?<span style={{color:"#fff",fontSize:11,fontWeight:700,lineHeight:1}}>✓</span>:null}</div>
               <span style={{flex:1,textAlign:"left",fontSize:13,color:done?"#5a5a6a":"#ccc",textDecoration:done?"line-through":"none"}}>{s.l}</span>
-              <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:done?"#3a3a5a":workout.color}}>{s.r}{typeof s.r==="number"?" reps":""}</span>
+              <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:done?"#3a3a5a":color}}>{s.r}{typeof s.r==="number"?" reps":""}</span>
             </button>;
           })}
         </div>}
-        <button onClick={()=>{onAllDone(ex.id);onClose();}} style={{width:"100%",padding:"13px",borderRadius:10,border:"none",background:allSetsDone?workout.color:"#1e1e35",color:allSetsDone?"#fff":"#aaaaaa",fontFamily:"'IBM Plex Mono',monospace",fontSize:13,fontWeight:600,cursor:"pointer"}}>
-          {allSetsDone?"Mark Complete":"Mark Complete"}
-        </button>
+        <button onClick={()=>{onAllDone(ex.id);onClose();}} style={{width:"100%",padding:"13px",borderRadius:10,border:"none",background:allSetsDone?color:"#1e1e35",color:allSetsDone?"#fff":"#aaaaaa",fontFamily:"'IBM Plex Mono',monospace",fontSize:13,fontWeight:600,cursor:"pointer",transition:"all .2s"}}>Mark Complete</button>
       </div>
     </div>
   </div>;
 }
 
-// ── Nutrition graph ───────────────────────────────────────────────────────────
-function NutritionGraph({weekData, weekLabel, isCurrent}){
-  // weekData: array of 7 {cal, prot} or null for each day Sun-Sat
-  const W=320, PL=36, PR=36, PT=10, PB=20;
-  const H = isCurrent ? 160 : 52;
-  const cW=W-PL-PR, cH=H-PT-PB;
-  const numLines = isCurrent ? 5 : 1;
-
-  // determine y scale — go up to max of goal or actual
-  const maxCal = Math.max(CAL_GOAL, ...weekData.filter(Boolean).map(d=>d.cal||0)) * 1.05;
-  const maxProt = Math.max(PROT_GOAL, ...weekData.filter(Boolean).map(d=>d.prot||0)) * 1.05;
-
-  const xOf = i => PL + (i/6)*cW;
-  const yOfCal = v => PT + cH - (v/maxCal)*cH;
-  const yOfProt = v => PT + cH - (v/maxProt)*cH;
-
-  const calPoints = weekData.map((d,i)=>d&&d.cal?{x:xOf(i),y:yOfCal(d.cal),v:d.cal,i}:null).filter(Boolean);
-  const protPoints = weekData.map((d,i)=>d&&d.prot?{x:xOf(i),y:yOfProt(d.prot),v:d.prot,i}:null).filter(Boolean);
-  const calPath = calPoints.length>1?calPoints.map((p,j)=>`${j===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" "):null;
-  const protPath = protPoints.length>1?protPoints.map((p,j)=>`${j===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" "):null;
-
-  const calGoalY = yOfCal(CAL_GOAL);
-  const protGoalY = yOfProt(PROT_GOAL);
-
-  return <div style={{background:"#0a0a16",borderRadius:isCurrent?12:8,border:"1px solid #1a1a2e",padding:isCurrent?"12px 8px 8px":"6px 8px",marginBottom:isCurrent?0:8}}>
-    {isCurrent&&<div style={{fontSize:9,letterSpacing:2,color:"#444",fontWeight:600,marginBottom:8,paddingLeft:PL}}>{weekLabel}</div>}
-    {!isCurrent&&<div style={{fontSize:9,color:"#333",marginBottom:4,paddingLeft:PL}}>{weekLabel}</div>}
+// ── Nutrition Graph ───────────────────────────────────────────────────────────
+function NutritionGraph({weekData,weekLabel,isCurrent}){
+  const W=320,PL=36,PR=36,PT=10,PB=20,H=isCurrent?160:52,cW=W-PL-PR,cH=H-PT-PB;
+  const numLines=isCurrent?5:1;
+  const maxCal=Math.max(CAL_GOAL,...weekData.filter(Boolean).map(d=>d.cal||0))*1.05;
+  const maxProt=Math.max(PROT_GOAL,...weekData.filter(Boolean).map(d=>d.prot||0))*1.05;
+  const xOf=i=>PL+(i/6)*cW;
+  const yOfCal=v=>PT+cH-(v/maxCal)*cH;
+  const yOfProt=v=>PT+cH-(v/maxProt)*cH;
+  const calPts=weekData.map((d,i)=>d&&d.cal?{x:xOf(i),y:yOfCal(d.cal),v:d.cal,i}:null).filter(Boolean);
+  const protPts=weekData.map((d,i)=>d&&d.prot?{x:xOf(i),y:yOfProt(d.prot),v:d.prot,i}:null).filter(Boolean);
+  const calPath=calPts.length>1?calPts.map((p,j)=>`${j===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" "):null;
+  const protPath=protPts.length>1?protPts.map((p,j)=>`${j===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" "):null;
+  return<div style={{background:"#0a0a16",borderRadius:isCurrent?12:8,border:"1px solid #1a1a2e",padding:isCurrent?"12px 8px 8px":"6px 8px",marginBottom:8}}>
+    <div style={{fontSize:9,color:isCurrent?"#666680":"#333",letterSpacing:isCurrent?2:0,fontWeight:isCurrent?600:400,marginBottom:isCurrent?8:4,paddingLeft:PL}}>{weekLabel}</div>
     <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:W,display:"block",margin:"0 auto"}}>
-      {/* Grid lines */}
-      {Array.from({length:numLines+1},(_,i)=>{
-        const y=PT+(i/numLines)*cH;
-        return <line key={i} x1={PL} y1={y} x2={W-PR} y2={y} stroke="#1a1a2e" strokeWidth="1"/>;
-      })}
-      {/* Goal dotted lines */}
-      <line x1={PL} y1={calGoalY} x2={W-PR} y2={calGoalY} stroke="#3498DB" strokeWidth="1" strokeDasharray="3,3" opacity="0.5"/>
-      <line x1={PL} y1={protGoalY} x2={W-PR} y2={protGoalY} stroke="#E67E22" strokeWidth="1" strokeDasharray="3,3" opacity="0.5"/>
-      {/* Y axis labels — current week only */}
-      {isCurrent&&Array.from({length:numLines+1},(_,i)=>{
-        const frac=1-(i/numLines);
-        const calV=Math.round(maxCal*frac);
-        const protV=Math.round(maxProt*frac);
-        const y=PT+(i/numLines)*cH;
-        return <g key={i}>
-          <text x={PL-4} y={y+4} textAnchor="end" fill="#3a3a5a" fontSize="7" fontFamily="monospace">{calV>0?calV:""}</text>
-          <text x={W-PR+4} y={y+4} textAnchor="start" fill="#3a3a5a" fontSize="7" fontFamily="monospace">{protV>0?protV:""}</text>
-        </g>;
-      })}
-      {/* X axis day labels — current week only */}
-      {isCurrent&&DAY_LABELS.map((d,i)=><text key={i} x={xOf(i)} y={H-4} textAnchor="middle" fill="#3a3a5a" fontSize="7" fontFamily="monospace">{d}</text>)}
-      {/* Calorie line */}
+      {Array.from({length:numLines+1},(_,i)=>{const y=PT+(i/numLines)*cH;return<line key={i} x1={PL} y1={y} x2={W-PR} y2={y} stroke="#1a1a2e" strokeWidth="1"/>;} )}
+      <line x1={PL} y1={yOfCal(CAL_GOAL)} x2={W-PR} y2={yOfCal(CAL_GOAL)} stroke="#3498DB" strokeWidth="1" strokeDasharray="3,3" opacity="0.5"/>
+      <line x1={PL} y1={yOfProt(PROT_GOAL)} x2={W-PR} y2={yOfProt(PROT_GOAL)} stroke="#E67E22" strokeWidth="1" strokeDasharray="3,3" opacity="0.5"/>
+      {isCurrent&&Array.from({length:numLines+1},(_,i)=>{const y=PT+(i/numLines)*cH,frac=1-(i/numLines);return<g key={i}><text x={PL-4} y={y+4} textAnchor="end" fill="#3a3a5a" fontSize="7" fontFamily="monospace">{Math.round(maxCal*frac)}</text><text x={W-PR+4} y={y+4} textAnchor="start" fill="#3a3a5a" fontSize="7" fontFamily="monospace">{Math.round(maxProt*frac)}</text></g>;})}
+      {isCurrent&&["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d,i)=><text key={i} x={xOf(i)} y={H-4} textAnchor="middle" fill="#3a3a5a" fontSize="7" fontFamily="monospace">{d}</text>)}
       {calPath&&<path d={calPath} fill="none" stroke="#3498DB" strokeWidth={isCurrent?2:1.5} strokeLinecap="round" strokeLinejoin="round"/>}
-      {isCurrent&&calPoints.map(p=><g key={p.i}>
-        <circle cx={p.x} cy={p.y} r="3" fill="#3498DB" stroke="#0a0a16" strokeWidth="1.5"/>
-        <text x={p.x} y={p.y-6} textAnchor="middle" fill="#3498DB" fontSize="7" fontFamily="monospace">{Math.round(p.v)}</text>
-      </g>)}
-      {/* Protein line */}
+      {isCurrent&&calPts.map(p=><g key={p.i}><circle cx={p.x} cy={p.y} r="3" fill="#3498DB" stroke="#0a0a16" strokeWidth="1.5"/><text x={p.x} y={p.y-6} textAnchor="middle" fill="#3498DB" fontSize="7" fontFamily="monospace">{Math.round(p.v)}</text></g>)}
       {protPath&&<path d={protPath} fill="none" stroke="#E67E22" strokeWidth={isCurrent?2:1.5} strokeLinecap="round" strokeLinejoin="round"/>}
-      {isCurrent&&protPoints.map(p=><g key={p.i}>
-        <circle cx={p.x} cy={p.y} r="3" fill="#E67E22" stroke="#0a0a16" strokeWidth="1.5"/>
-        <text x={p.x} y={p.y+14} textAnchor="middle" fill="#E67E22" fontSize="7" fontFamily="monospace">{Math.round(p.v)}</text>
-      </g>)}
+      {isCurrent&&protPts.map(p=><g key={p.i}><circle cx={p.x} cy={p.y} r="3" fill="#E67E22" stroke="#0a0a16" strokeWidth="1.5"/><text x={p.x} y={p.y+14} textAnchor="middle" fill="#E67E22" fontSize="7" fontFamily="monospace">{Math.round(p.v)}</text></g>)}
     </svg>
     {isCurrent&&<div style={{display:"flex",gap:16,justifyContent:"center",marginTop:6}}>
       <div style={{display:"flex",alignItems:"center",gap:5,fontSize:10,color:"#3498DB"}}><svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" stroke="#3498DB" strokeWidth="2"/></svg>Calories</div>
       <div style={{display:"flex",alignItems:"center",gap:5,fontSize:10,color:"#E67E22"}}><svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" stroke="#E67E22" strokeWidth="2"/></svg>Protein</div>
-      <div style={{display:"flex",alignItems:"center",gap:5,fontSize:10,color:"#444"}}><svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" stroke="#3498DB" strokeWidth="1" strokeDasharray="3,3" opacity="0.6"/></svg>Goal</div>
     </div>}
+  </div>;
+}
+
+// ── Pace Graph ────────────────────────────────────────────────────────────────
+function PaceGraph({runWeekActuals}){
+  // runWeekActuals: {4:{sun,mon,wed,thu,sat}, 8:{...}, 12:{...}}
+  const COLORS=["#3498DB","#2ECC71","#E67E22"];
+  const DIST_LABELS=["6k","8k","10k","8k","6k"];
+  const RUN_WEEKS=[4,8,12];
+  const W=320,PL=36,PR=20,PT=12,PB=24,H=140,cW=W-PL-PR,cH=H-PT-PB;
+  // collect all pace values to determine scale
+  const allPaces=[];
+  RUN_WEEKS.forEach(wk=>{
+    const d=runWeekActuals[wk]||{};
+    [d.sun,d.mon,d.wed,d.thu,d.sat].forEach(v=>{if(v)allPaces.push(v/parseFloat(DIST_LABELS[[d.sun,d.mon,d.wed,d.thu,d.sat].indexOf(v)]))});
+  });
+  // pace = time/km
+  const distKm=[6,8,10,8,6];
+  const getPaces=wk=>{
+    const d=runWeekActuals[wk]||{};
+    return [d.sun,d.mon,d.wed,d.thu,d.sat].map((v,i)=>v?v/distKm[i]:null);
+  };
+  const allP=RUN_WEEKS.flatMap(w=>getPaces(w).filter(Boolean));
+  if(!allP.length) return<div style={{background:"#0a0a16",borderRadius:12,border:"1px solid #1a1a2e",padding:"16px",textAlign:"center",fontSize:10,color:"#55556a"}}>Log run week times to see pace graph</div>;
+  const minP=Math.min(...allP)*0.95,maxP=Math.max(...allP)*1.05;
+  const xOf=i=>PL+(i/4)*cW;
+  const yOf=v=>PT+cH-((v-minP)/(maxP-minP))*cH;
+  return<div style={{background:"#0a0a16",borderRadius:12,border:"1px solid #1a1a2e",padding:"12px 8px 8px"}}>
+    <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:W,display:"block",margin:"0 auto"}}>
+      {Array.from({length:5},(_,i)=>{const y=PT+(i/4)*cH;return<line key={i} x1={PL} y1={y} x2={W-PR} y2={y} stroke="#1a1a2e" strokeWidth="1"/>;} )}
+      {DIST_LABELS.map((d,i)=><text key={i} x={xOf(i)} y={H-6} textAnchor="middle" fill="#3a3a5a" fontSize="8" fontFamily="monospace">{d}</text>)}
+      {Array.from({length:5},(_,i)=>{const v=minP+(maxP-minP)*(1-i/4);return<text key={i} x={PL-4} y={PT+(i/4)*cH+4} textAnchor="end" fill="#3a3a5a" fontSize="7" fontFamily="monospace">{v.toFixed(1)}</text>;})}
+      {RUN_WEEKS.map((wk,wi)=>{
+        const paces=getPaces(wk);
+        const pts=paces.map((v,i)=>v?{x:xOf(i),y:yOf(v),v,i}:null).filter(Boolean);
+        if(pts.length<2)return null;
+        const path=pts.map((p,j)=>`${j===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+        return<g key={wk}>
+          <path d={path} fill="none" stroke={COLORS[wi]} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+          {pts.map(p=><circle key={p.i} cx={p.x} cy={p.y} r="3" fill={COLORS[wi]} stroke="#0a0a16" strokeWidth="1.5"/>)}
+        </g>;
+      })}
+    </svg>
+    <div style={{display:"flex",gap:12,justifyContent:"center",marginTop:6}}>
+      {RUN_WEEKS.map((wk,i)=><div key={wk} style={{display:"flex",alignItems:"center",gap:4,fontSize:10,color:COLORS[i]}}><svg width="14" height="6"><line x1="0" y1="3" x2="14" y2="3" stroke={COLORS[i]} strokeWidth="2"/></svg>Wk {wk}</div>)}
+    </div>
   </div>;
 }
 
 // ── Main App ──────────────────────────────────────────────────────────────────
 function App(){
-  const today=DAYS[new Date().getDay()], isSaturday=today==="Saturday";
+  const today=DAYS[new Date().getDay()];
+  const dayIdx=new Date().getDay();
   const todayKey=dateKey();
-  const todayDayIdx=new Date().getDay();
-
-  const [tab,setTab]=useState(isSaturday?"progress":"today");
+  const [tab,setTab]=useState("today");
   const [checked,setChecked]=useState({});
   const [repChecked,setRepChecked]=useState({});
   const [actuals,setActuals]=useState({});
-  const [currentWeek,setCurrentWeek]=useState(()=>{
-    const fs=new Date("2026-05-27"),now=new Date();
-    if(now<fs) return 1;
-    return Math.min(10,Math.max(1,Math.floor((now-fs)/(7*24*60*60*1000))+1));
-  });
+  const [runWeekActuals,setRunWeekActuals]=useState({});
+  const [currentWeek,setCurrentWeek]=useState(getCurrentWeek);
   const [puSets,setPuSets]=useState(0);
   const [graphMetric,setGraphMetric]=useState("pushups");
   const [saveStatus,setSaveStatus]=useState("");
@@ -286,129 +330,126 @@ function App(){
   const holdTimer=useRef(null);
   const loaded=useRef(false);
 
-  // Nutrition state
-  const [nutLog,setNutLog]=useState([]); // [{id,desc,cal,prot,time}]
-  const [nutInput,setNutInput]=useState("");
-  const [nutLoading,setNutLoading]=useState(false);
-  const [nutError,setNutError]=useState("");
-  const [allNutWeeks,setAllNutWeeks]=useState({}); // {weekKey: {dateKey: {cal,prot}}}
+  // Nutrition
+  const [nutCal,setNutCal]=useState("");
+  const [nutProt,setNutProt]=useState("");
+  const [nutDay,setNutDay]=useState(todayKey);
+  const [allNutWeeks,setAllNutWeeks]=useState({});
 
-  // ── Storage load ─────────────────────────────────────────────────────────────
+  // ── Load ─────────────────────────────────────────────────────────────────────
   useEffect(()=>{
     const a=LS.get("ft_actuals"); if(a) setActuals(a);
+    const rwa=LS.get("ft_runweek_actuals"); if(rwa) setRunWeekActuals(rwa);
     const d=LS.get("ft_daily_"+todayKey);
     if(d){if(d.checked)setChecked(d.checked);if(d.repChecked)setRepChecked(d.repChecked);if(d.puSets!==undefined)setPuSets(d.puSets);}
-    const nl=LS.get("ft_nutlog_"+todayKey); if(nl) setNutLog(nl);
     const nw=LS.get("ft_nutweeks"); if(nw) setAllNutWeeks(nw);
+    // Load today's nutrition values
+    const nutData=LS.get("ft_nut_all")||{};
+    const todayNut=nutData[todayKey];
+    if(todayNut){if(todayNut.cal!==undefined)setNutCal(String(todayNut.cal));if(todayNut.prot!==undefined)setNutProt(String(todayNut.prot));}
     loaded.current=true;
   },[]);
 
+  // ── Save ─────────────────────────────────────────────────────────────────────
   useEffect(()=>{if(!loaded.current)return;if(Object.keys(actuals).length===0)return;setSaveStatus("saving");const t=setTimeout(()=>{LS.set("ft_actuals",actuals);setSaveStatus("saved");setTimeout(()=>setSaveStatus(""),1800);},600);return()=>clearTimeout(t);},[actuals]);
+  useEffect(()=>{if(!loaded.current)return;LS.set("ft_runweek_actuals",runWeekActuals);},[runWeekActuals]);
   useEffect(()=>{if(!loaded.current)return;const t=setTimeout(()=>{LS.set("ft_daily_"+todayKey,{checked,repChecked,puSets});},400);return()=>clearTimeout(t);},[checked,repChecked,puSets]);
-  useEffect(()=>{if(!loaded.current)return;LS.set("ft_nutlog_"+todayKey,nutLog);
-    // Update weekly nutrition summary
-    const cal=nutLog.reduce((s,e)=>s+e.cal,0);
-    const prot=nutLog.reduce((s,e)=>s+e.prot,0);
-    const wk=weekKey(currentWeek);
-    setAllNutWeeks(prev=>{
-      const next={...prev,[wk]:{...(prev[wk]||{}),[todayKey]:{cal,prot}}};
-      LS.set("ft_nutweeks",next);
-      return next;
-    });
-  },[nutLog]);
+  useEffect(()=>{
+    if(!loaded.current)return;
+    const cal=parseFloat(nutCal)||0, prot=parseFloat(nutProt)||0;
+    // Save to per-day store
+    const allNut=LS.get("ft_nut_all")||{};
+    allNut[nutDay]={cal,prot};
+    LS.set("ft_nut_all",allNut);
+    // Update weekly nutrition summary for graph
+    if(cal||prot){
+      setAllNutWeeks(prev=>{const next={...prev,["w"+currentWeek]:{...(prev["w"+currentWeek]||{}),[nutDay]:{cal,prot}}};LS.set("ft_nutweeks",next);return next;});
+    }
+  },[nutCal,nutProt,nutDay]);
 
-  const workout=WORKOUTS[today];
-  const puTarget=PU_WEEK_REPS[currentWeek-1];
+  // When nutDay changes, load values for that day
+  useEffect(()=>{
+    if(!loaded.current)return;
+    const allNut=LS.get("ft_nut_all")||{};
+    const dayNut=allNut[nutDay];
+    setNutCal(dayNut?.cal?String(dayNut.cal):"");
+    setNutProt(dayNut?.prot?String(dayNut.prot):"");
+  },[nutDay]);
+
+  // ── Workout for today ─────────────────────────────────────────────────────────
+  const runWeek=isRunWeek(currentWeek);
+  const workout=runWeek?getRunWeekWorkout(dayIdx):STRENGTH_WORKOUTS[today];
+
+  const puTarget=PU_WEEK_REPS[Math.min(currentWeek-1,11)];
+  const showPushups=runWeek?(workout.isMaintenance||false):(!workout.skipPushups&&!workout.isRest&&!workout.isRun);
   const doneCount=workout.exercises.filter(e=>checked[e.id]).length;
-  const allDone=doneCount===workout.exercises.length&&(workout.skipPushups||puSets>=5);
+  const allDone=workout.isRest||(doneCount===workout.exercises.length&&(showPushups?puSets>=5:true));
 
-  const setActual=(wk,key,val)=>setActuals(p=>({...p,[wk]:{...(p[wk]||{}),[key]:val===""?undefined:parseFloat(val)}}));
-  const getDiff=(wk,key)=>{const a=actuals[wk]?.[key];return a===undefined?null:a-WEEKS[wk-1].goals[key];};
-  const fmtDiff=(diff,key)=>{if(diff===null)return"—";const d=key==="run"||key==="weight"?1:0;return`${diff>=0?"+":""}${diff.toFixed(d)}`;};
+  const setActualFn=(wk,key,val)=>setActuals(p=>({...p,[wk]:{...(p[wk]||{}),[key]:val===""?undefined:parseFloat(val)}}));
+  const getDiff=(wk,key)=>{
+    const a=actuals[wk]?.[key];
+    const g=getGoal(key,wk);
+    if(a===undefined||g===null)return null;
+    const metric=METRICS.find(m=>m.key===key);
+    if(metric&&metric.lowerIsBetter) return g-a; // positive = good (faster)
+    return a-g;
+  };
+  const fmtDiff=(diff,key)=>{if(diff===null)return"—";const d=key==="run5k"||key==="weight"?1:0;return`${diff>=0?"+":""}${diff.toFixed(d)}`;};
   const diffColor=diff=>diff===null?"#555":diff>=0?"#2ECC71":"#E74C3C";
+  const timeDiffColor=diff=>diff===null?"#555":diff<=0?"#2ECC71":"#E74C3C";
+  const timeDiffBg=diff=>diff===null?"#1a1a2a":diff<=0?"#0d2a1a":"#2a0d0d";
+  const timeDiffBorder=diff=>diff===null?"#333":diff<=0?"#2ECC71":"#E74C3C";
+  const fmtTimeDiff=diff=>{if(diff===null)return"—";return`${diff>=0?"+":""}${diff.toFixed(1)} min`;};
   const diffBg=diff=>diff===null?"#1a1a2a":diff>=0?"#0d2a1a":"#2a0d0d";
   const diffBorder=diff=>diff===null?"#333":diff>=0?"#2ECC71":"#E74C3C";
 
   const startHold=id=>{holdTimer.current=setTimeout(()=>setOverlay(id),450);};
   const endHold=()=>clearTimeout(holdTimer.current);
-
-  const markAllSetsDone=exId=>{const d=EX_DETAILS[exId];if(!d)return;setChecked(p=>({...p,[exId]:true}));if(d.sets.length>0){const u={};d.sets.forEach((_,si)=>{u[`${exId}_s${si}`]=true;});setRepChecked(p=>({...p,...u}));}};
-  useEffect(()=>{workout.exercises.forEach(ex=>{const d=EX_DETAILS[ex.id];if(!d||d.sets.length===0)return;if(d.sets.every((_,si)=>repChecked[`${ex.id}_s${si}`])&&!checked[ex.id])setChecked(p=>({...p,[ex.id]:true}));});},[repChecked]);
+  const markAllSetsDone=exId=>{const d=EX[exId];if(!d)return;setChecked(p=>({...p,[exId]:true}));if(d.sets.length>0){const u={};d.sets.forEach((_,si)=>{u[`${exId}_s${si}`]=true;});setRepChecked(p=>({...p,...u}));}};
+  useEffect(()=>{if(workout.isRest)return;workout.exercises.forEach(ex=>{const d=EX[ex.id];if(!d||d.sets.length===0)return;if(d.sets.every((_,si)=>repChecked[`${ex.id}_s${si}`])&&!checked[ex.id])setChecked(p=>({...p,[ex.id]:true}));});},[repChecked]);
 
   const overlayEx=overlay?workout.exercises.find(e=>e.id===overlay):null;
-  const tomorrowDay=DAYS[(new Date().getDay()+1)%7];
-  const tomorrowWorkout=WORKOUTS[tomorrowDay];
+  const tomorrowDay=DAYS[(dayIdx+1)%7];
+  const tomorrowWorkout=runWeek?getRunWeekWorkout((dayIdx+1)%7):STRENGTH_WORKOUTS[tomorrowDay];
 
-  // Nutrition totals
-  const totalCal=nutLog.reduce((s,e)=>s+e.cal,0);
-  const totalProt=nutLog.reduce((s,e)=>s+e.prot,0);
+  // Nutrition totals (parsed directly from inputs)
+  const totalCal=parseFloat(nutCal)||0;
+  const totalProt=parseFloat(nutProt)||0;
 
-  // Claude API nutrition lookup
-  const lookupNutrition=async()=>{
-    if(!nutInput.trim()) return;
-    setNutLoading(true); setNutError("");
-    setNutError("");
-    try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",
-        headers:{
-          "Content-Type":"application/json",
-          "anthropic-version":"2023-06-01",
-          "anthropic-dangerous-direct-browser-access":"true"
-        },
-        body:JSON.stringify({
-          model:"claude-sonnet-4-20250514",
-          max_tokens:300,
-          system:"Respond with ONLY a raw JSON object. No markdown, no backticks, no extra text. Format: {cal:NUMBER,prot:NUMBER,desc:STRING}",
-          messages:[{role:"user",content:nutInput.trim()}],
-        }),
-      });
-      const rawText=await res.text();
-      const data=JSON.parse(rawText);
-      if(data.error) throw new Error(data.error.message);
-      const text=(data.content||[]).map(b=>b.type==="text"?b.text:"").join("").trim();
-      const jsonStart=text.indexOf("{");
-      const jsonEnd=text.lastIndexOf("}")+1;
-      if(jsonStart===-1) throw new Error("No JSON returned");
-      const parsed=JSON.parse(text.slice(jsonStart,jsonEnd));
-      const entry={id:Date.now(),desc:parsed.desc||nutInput.trim(),cal:Math.round(parsed.cal||0),prot:Math.round((parsed.prot||0)*10)/10,time:new Date().toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"})};
-      setNutLog(prev=>[...prev,entry]);
-      setNutInput("");
-    }catch(e){setNutError("Error: "+e.message);}
-    setNutLoading(false);
-  };
 
-  // Build current week nutrition data for graph
-  const currentWeekNutData=()=>{
-    const wk=weekKey(currentWeek);
-    const weekStart=new Date("2026-05-27");
-    weekStart.setDate(weekStart.getDate()+(currentWeek-1)*7);
+
+  // Nutrition weekly data
+  const getNutWeekData=wkNum=>{
+    const wkStart=new Date(PROGRAM_START);
+    wkStart.setDate(wkStart.getDate()+(wkNum-1)*7);
+    const allNut=LS.get("ft_nut_all")||{};
     return Array.from({length:7},(_,i)=>{
-      const d=new Date(weekStart); d.setDate(d.getDate()+i);
+      const d=new Date(wkStart);d.setDate(d.getDate()+i);
       const dk=dateKey(d);
-      if(dk===todayKey&&nutLog.length>0) return {cal:totalCal,prot:totalProt};
-      return allNutWeeks[wk]?.[dk]||null;
+      const entry=allNut[dk];
+      return entry&&(entry.cal||entry.prot)?entry:null;
     });
   };
 
-  // Build previous weeks nutrition data
-  const prevWeeksNutData=()=>{
-    const weeks=[];
-    for(let w=currentWeek-1;w>=Math.max(1,currentWeek-4);w--){
-      const wk=weekKey(w);
-      const weekStart=new Date("2026-05-27");
-      weekStart.setDate(weekStart.getDate()+(w-1)*7);
-      const data=Array.from({length:7},(_,i)=>{
-        const d=new Date(weekStart); d.setDate(d.getDate()+i);
-        return allNutWeeks[wk]?.[dateKey(d)]||null;
-      });
-      weeks.push({label:`Week ${w}`,data});
-    }
-    return weeks;
+  // Run week time actuals helpers
+  const DAY_TO_RUN_KEY={0:"sun",1:"mon",3:"wed",4:"thu",6:"sat"};
+  const setRunTime=(wk,dk,val)=>setRunWeekActuals(p=>({...p,[wk]:{...(p[wk]||{}),[dk]:val===""?undefined:parseFloat(val)}}));
+  const getRunDiff=(wk,dist,dk)=>{
+    const actual=runWeekActuals[wk]?.[dk];
+    if(actual===undefined)return null;
+    const goal=getRunWeekGoal(dist,runWeekIndex(wk));
+    return actual-goal; // negative = faster = green
   };
 
-  return <div style={{minHeight:"100vh",background:"#0a0a12",fontFamily:"'IBM Plex Mono',monospace",color:"#e8e8f0"}}>
-    {overlayEx&&<ExOverlay ex={overlayEx} workout={workout} repChecked={repChecked} onRepCheck={key=>setRepChecked(p=>({...p,[key]:!p[key]}))} onClose={()=>setOverlay(null)} onAllDone={markAllSetsDone}/>}
+  // Strength weeks table data
+  const strengthWeeks=STRENGTH_WEEKS;
+  // Run weeks for run table
+  const runWeeks=[4,8,12];
+
+  const tipIdx=(currentWeek-1)%TIPS.length;
+
+  return<div style={{minHeight:"100vh",background:"#0a0a12",fontFamily:"'IBM Plex Mono',monospace",color:"#e8e8f0"}}>
+    {overlayEx&&<ExOverlay ex={overlayEx} color={workout.color} label={workout.label} repChecked={repChecked} onRepCheck={key=>setRepChecked(p=>({...p,[key]:!p[key]}))} onClose={()=>setOverlay(null)} onAllDone={markAllSetsDone}/>}
 
     {/* Header */}
     <div style={{position:"sticky",top:0,zIndex:10,background:"rgba(10,10,18,.97)",backdropFilter:"blur(12px)",borderBottom:"1px solid #1a1a2e",padding:"14px 16px 0"}}>
@@ -417,7 +458,7 @@ function App(){
           <div style={{display:"flex",alignItems:"center",gap:8,fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:900,letterSpacing:3,color:"#fff"}}>
             <span style={{fontSize:20,filter:"drop-shadow(0 0 8px #E67E22)"}}>⚡</span>FITNESS TRACKER
           </div>
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,letterSpacing:4,color:"#333",marginTop:2,paddingLeft:28}}>10 WEEKS</div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,letterSpacing:4,color:"#333",marginTop:2,paddingLeft:28}}>12 WEEKS · {runWeek?"RUN WEEK":"STRENGTH WEEK"}</div>
         </div>
         <div style={{textAlign:"right"}}>
           <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:12,fontWeight:700,letterSpacing:3,color:"#E67E22"}}>{today.toUpperCase()}</div>
@@ -425,7 +466,7 @@ function App(){
         </div>
       </div>
       <div style={{display:"flex"}}>
-        {[["today","Today"],["progress",`Progress${isSaturday?" *":""}`],["nutrition","Nutrition"]].map(([id,label])=>(
+        {[["today","Today"],["progress","Progress"],["nutrition","Nutrition"]].map(([id,label])=>(
           <button key={id} onClick={()=>setTab(id)} style={{flex:1,padding:"10px 6px",background:"transparent",border:"none",borderBottom:tab===id?"2px solid #E67E22":"2px solid transparent",color:tab===id?"#e8e8f0":"#444",fontFamily:"'IBM Plex Mono',monospace",fontSize:10,fontWeight:500,cursor:"pointer",letterSpacing:.5,transition:"all .2s"}}>{label}</button>
         ))}
       </div>
@@ -433,245 +474,400 @@ function App(){
 
     <div style={{padding:"18px 14px 48px",maxWidth:560,margin:"0 auto"}}>
 
-      {/* TODAY TAB */}
+      {/* ══ TODAY TAB ══ */}
       {tab==="today"&&<div className="fade">
         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:18,flexWrap:"wrap"}}>
           <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:11,fontWeight:900,letterSpacing:3,padding:"3px 9px",borderRadius:4,color:"#fff",background:workout.color}}>{today.toUpperCase()}</span>
           <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:700,letterSpacing:1,color:"#fff"}}>{workout.label}</span>
+          {runWeek&&<span style={{fontSize:10,background:"#1e1e35",color:"#888",padding:"2px 8px",borderRadius:10}}>Week {currentWeek} — Run Week</span>}
         </div>
-        {allDone&&<div style={{background:"linear-gradient(90deg,#0d2a1a,#1a3d28)",border:"1px solid #2ECC71",borderRadius:8,padding:"10px 14px",color:"#2ECC71",fontWeight:600,fontSize:13,letterSpacing:1,marginBottom:16}}>Workout complete. Well done.</div>}
 
-        <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
-          {workout.exercises.map((ex,i)=>{
-            const d=EX_DETAILS[ex.id];
-            const setsTotal=d?.sets.length||0,setsDone=d?.sets.filter((_,si)=>repChecked[`${ex.id}_s${si}`]).length||0;
-            return <div key={ex.id} className="fade"
-              style={{display:"flex",alignItems:"center",gap:10,background:checked[ex.id]?"#0a0e0a":"#0f0f1e",border:`1px solid ${checked[ex.id]?"#1a2a1a":"#1e1e35"}`,borderRadius:8,padding:"11px 12px",width:"100%",transition:"all .15s",userSelect:"none",animationDelay:`${i*50}ms`}}
-              onTouchStart={()=>startHold(ex.id)} onTouchEnd={endHold} onTouchMove={endHold}
-              onMouseDown={()=>startHold(ex.id)} onMouseUp={endHold} onMouseLeave={endHold}>
-              <button onClick={e=>{e.stopPropagation();setChecked(p=>({...p,[ex.id]:!p[ex.id]}));}}
-                style={{width:22,height:22,borderRadius:6,flexShrink:0,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s",background:checked[ex.id]?workout.color:"#0f0f1e",border:`2px solid ${checked[ex.id]?workout.color:"#2e2e4e"}`}}>
-                {checked[ex.id]&&<span style={{color:"#fff",fontSize:12,fontWeight:700,lineHeight:1}}>v</span>}
-              </button>
-              <div style={{flex:1,minWidth:0}} onClick={()=>setChecked(p=>({...p,[ex.id]:!p[ex.id]}))}>
-                <div style={{fontSize:13,lineHeight:1.4,color:checked[ex.id]?"#55556a":"#c8c8d8",textDecoration:checked[ex.id]?"line-through":"none"}}>{ex.text}</div>
-                <div style={{display:"flex",gap:8,alignItems:"center",marginTop:2}}>
-                  {d?.sets.length>0&&<span style={{fontSize:9,color:"#666680",letterSpacing:.5}}>{d.sets.length}x{d.sets[0].r}</span>}
-                  {d?.weight&&d.weight!=="—"&&d.weight!=="Bodyweight"&&<span style={{fontSize:9,color:"#5a5020",letterSpacing:.3}}>· {d.weight}</span>}
-                  {setsTotal>0&&setsDone>0&&<span style={{fontSize:9,color:setsDone===setsTotal?"#2ECC71":"#4a6a4a"}}>{setsDone}/{setsTotal}</span>}
+        {workout.isRest?<div style={{background:"#0f0f1e",border:"1px solid #1e1e35",borderRadius:12,padding:24,textAlign:"center",marginBottom:20}}>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:28,fontWeight:700,color:"#7F8C8D",marginBottom:8}}>Rest Day</div>
+          <div style={{fontSize:13,color:"#555",lineHeight:1.6}}>Muscles grow during recovery, not during workouts. Protect this day.</div>
+        </div>:<>
+          {allDone&&<div style={{background:"linear-gradient(90deg,#0d2a1a,#1a3d28)",border:"1px solid #2ECC71",borderRadius:8,padding:"10px 14px",color:"#2ECC71",fontWeight:600,fontSize:13,marginBottom:16}}>Workout complete. Well done.</div>}
+
+          {/* Run day reminder */}
+          {(workout.isRun&&!runWeek)&&<div style={{background:"#0a0a18",border:"1px solid #1e2e3e",borderRadius:10,padding:"12px 14px",marginBottom:16,fontSize:12,color:"#3498DB"}}>
+            Log your 5k time in the Progress tab after your run.
+          </div>}
+          {workout.isRun&&runWeek&&<div style={{background:"#0a0a18",border:"1px solid #1e2e3e",borderRadius:10,padding:"12px 14px",marginBottom:16,fontSize:12,color:"#3498DB"}}>
+            Log your {workout.runDist} time in the Progress tab after your run.
+          </div>}
+
+          {/* Max day reminder */}
+          {workout.isMaxDay&&<div style={{background:"#14120a",border:"1px solid #2a2200",borderRadius:10,padding:"12px 14px",marginBottom:16,fontSize:12,color:"#F1C40F"}}>
+            Max rep day — log your best set in the Progress tab.
+          </div>}
+
+          <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
+            {workout.exercises.map((ex,i)=>{
+              const d=EX[ex.id];
+              const setsTotal=d?.sets.length||0,setsDone=d?.sets.filter((_,si)=>repChecked[`${ex.id}_s${si}`]).length||0;
+              return<div key={ex.id+i} className="fade"
+                style={{display:"flex",alignItems:"center",gap:10,background:checked[ex.id]?"#0a0e0a":"#0f0f1e",border:`1px solid ${checked[ex.id]?"#1a2a1a":"#1e1e35"}`,borderRadius:8,padding:"11px 12px",width:"100%",transition:"all .15s",userSelect:"none",animationDelay:`${i*50}ms`}}
+                onTouchStart={()=>startHold(ex.id)} onTouchEnd={endHold} onTouchMove={endHold}
+                onMouseDown={()=>startHold(ex.id)} onMouseUp={endHold} onMouseLeave={endHold}>
+                <button onClick={e=>{e.stopPropagation();setChecked(p=>({...p,[ex.id]:!p[ex.id]}));}}
+                  style={{width:22,height:22,borderRadius:6,flexShrink:0,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",transition:"all .15s",background:checked[ex.id]?workout.color:"#0f0f1e",border:`2px solid ${checked[ex.id]?workout.color:"#2e2e4e"}`}}>
+                  {checked[ex.id] ? <span style={{color:"#fff",fontSize:12,fontWeight:700,lineHeight:1}}>✓</span> : null}
+                </button>
+                <div style={{flex:1,minWidth:0}} onClick={()=>setChecked(p=>({...p,[ex.id]:!p[ex.id]}))}>
+                  <div style={{fontSize:13,lineHeight:1.4,color:checked[ex.id]?"#55556a":"#c8c8d8",textDecoration:checked[ex.id]?"line-through":"none"}}>{ex.text}</div>
+                  <div style={{display:"flex",gap:8,alignItems:"center",marginTop:2}}>
+                    {d?.sets.length>0&&<span style={{fontSize:9,color:"#666680"}}>{d.sets.length}x{d.sets[0].r}</span>}
+                    {d?.weight&&d.weight!=="—"&&d.weight!=="Bodyweight"&&<span style={{fontSize:9,color:"#5a5020"}}>· {d.weight}</span>}
+                    {setsTotal>0&&setsDone>0&&<span style={{fontSize:9,color:setsDone===setsTotal?"#2ECC71":"#4a6a4a"}}>{setsDone}/{setsTotal}</span>}
+                  </div>
                 </div>
-              </div>
-              <button onClick={()=>setOverlay(ex.id)} style={{background:"#1a1a2e",border:"none",borderRadius:6,color:"#666680",width:28,height:28,fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,paddingBottom:1}}>›</button>
-            </div>;
-          })}
-        </div>
-        <div style={{fontSize:10,color:"#2a2a3a",textAlign:"center",marginBottom:16,letterSpacing:.5}}>Tap › for details + rest timer · hold to open</div>
-        <div style={{marginBottom:24}}>
-          <div style={{fontSize:11,color:"#666680",letterSpacing:1,marginBottom:5}}>{doneCount} / {workout.exercises.length} complete</div>
-          <div style={{height:4,background:"#1a1a2e",borderRadius:2,overflow:"hidden"}}><div style={{height:"100%",borderRadius:2,transition:"width .4s ease",width:`${(doneCount/workout.exercises.length)*100}%`,background:workout.color}}/></div>
-        </div>
-
-        {/* Push-up tracker */}
-        <div style={{background:"#0f0f1e",border:"1px solid #2a1e0e",borderRadius:12,padding:16,marginBottom:16}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14,gap:10}}>
-            <div>
-              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:17,fontWeight:700,letterSpacing:1,color:"#E67E22",marginBottom:3}}>Daily Push-Up Practice</div>
-              <div style={{fontSize:11,color:"#666",lineHeight:1.4}}>{workout.skipPushups?"Skip today — push day conflicts":`${puTarget} reps per set · never to failure · Week ${currentWeek}`}</div>
-            </div>
-            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:900,padding:"4px 12px",borderRadius:8,letterSpacing:1,flexShrink:0,background:puSets>=5?"#0d2a1a":"#1a1a2e",border:`1px solid ${puSets>=5?"#2ECC71":"#2e2e4e"}`,color:puSets>=5?"#2ECC71":"#888"}}>{puSets}/5</div>
+                {d&&d.sets.length>0&&<button onClick={()=>setOverlay(ex.id)} style={{background:"#1a1a2e",border:"none",borderRadius:6,color:"#666680",width:28,height:28,fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,paddingBottom:1}}>›</button>}
+              </div>;
+            })}
           </div>
-          {!workout.skipPushups&&<>
+          {workout.exercises.length>0&&<>
+            <div style={{fontSize:10,color:"#2a2a3a",textAlign:"center",marginBottom:16,letterSpacing:.5}}>Tap › for details + rest timer · hold to open</div>
+            <div style={{marginBottom:24}}>
+              <div style={{fontSize:11,color:"#666680",marginBottom:5}}>{doneCount} / {workout.exercises.length} complete</div>
+              <div style={{height:4,background:"#1a1a2e",borderRadius:2,overflow:"hidden"}}><div style={{height:"100%",borderRadius:2,transition:"width .4s ease",width:`${workout.exercises.length>0?(doneCount/workout.exercises.length)*100:0}%`,background:workout.color}}/></div>
+            </div>
+          </>}
+
+          {/* Push-up tracker */}
+          {showPushups&&<div style={{background:"#0f0f1e",border:"1px solid #2a1e0e",borderRadius:12,padding:16,marginBottom:16}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14,gap:10}}>
+              <div>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:17,fontWeight:700,letterSpacing:1,color:"#E67E22",marginBottom:3}}>Daily Push-Up Practice</div>
+                <div style={{fontSize:11,color:"#666"}}>{puTarget} reps per set · never to failure · Week {currentWeek}</div>
+              </div>
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:900,padding:"4px 12px",borderRadius:8,flexShrink:0,background:puSets>=5?"#0d2a1a":"#1a1a2e",border:`1px solid ${puSets>=5?"#2ECC71":"#2e2e4e"}`,color:puSets>=5?"#2ECC71":"#888"}}>{puSets}/5</div>
+            </div>
             <div style={{display:"flex",gap:10,justifyContent:"center",margin:"4px 0 6px"}}>
               {[1,2,3,4,5].map(n=><button key={n} className="pu-btn" onClick={()=>setPuSets(s=>s>=n?n-1:n)}
                 style={{width:48,height:48,borderRadius:12,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",transition:"all .15s",flexShrink:0,background:puSets>=n?"#E67E22":"#1a1a2e",border:`2px solid ${puSets>=n?"#E67E22":"#2e2e4e"}`,boxShadow:puSets>=n?"0 0 10px #E67E2260":"none"}}>
-                {puSets>=n?<span style={{color:"#fff",fontSize:13,fontWeight:700}}>v</span>:<span style={{color:"#3a3a5a",fontSize:12}}>{n}</span>}
+                {puSets>=n ? <span style={{color:"#fff",fontSize:13,fontWeight:700}}>✓</span> : <span style={{color:"#3a3a5a",fontSize:12}}>{n}</span>}
               </button>)}
             </div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:10}}>
-              <div style={{fontSize:11,color:"#666680"}}>{puSets===0?"Tap a dot when you finish a set":puSets<5?`${5-puSets} set${5-puSets!==1?"s":""} to go`:"All 5 sets done"}</div>
+              <div style={{fontSize:11,color:"#666680"}}>{puSets===0?"Tap when you finish a set":puSets<5?`${5-puSets} to go`:"All 5 done"}</div>
               {puSets>0&&<button onClick={()=>setPuSets(0)} style={{background:"transparent",border:"1px solid #2e2e4e",borderRadius:5,color:"#666680",fontFamily:"'IBM Plex Mono',monospace",fontSize:10,padding:"3px 8px",cursor:"pointer"}}>Reset</button>}
             </div>
-            <div style={{marginTop:10,fontSize:11,color:"#666680",background:"#0a0a18",borderRadius:6,padding:"7px 10px",lineHeight:1.5}}>
-              <span style={{color:"#E67E22",fontWeight:600}}>Week {currentWeek}:</span> {puTarget} reps x 5 sets <span style={{color:"#55556a"}}>· stop 3–4 short of failure</span>
-            </div>
-          </>}
-        </div>
+            <div style={{marginTop:10,fontSize:11,color:"#666680",background:"#0a0a18",borderRadius:6,padding:"7px 10px"}}><span style={{color:"#E67E22",fontWeight:600}}>Week {currentWeek}:</span> {puTarget} reps x 5 sets <span style={{color:"#55556a"}}>· stop 3–4 short of failure</span></div>
+          </div>}
+        </>}
 
         {/* Up Next */}
         <div style={{background:"#0f0f1e",border:"1px solid #1e1e35",borderLeft:`3px solid ${tomorrowWorkout.color}`,borderRadius:12,padding:16,marginBottom:16}}>
           <div style={{fontSize:9,letterSpacing:2,color:"#666680",marginBottom:6,fontWeight:600}}>UP NEXT — {tomorrowDay.toUpperCase()}</div>
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:700,color:"#fff",marginBottom:8}}>{tomorrowWorkout.label}</div>
-          <div style={{display:"flex",flexDirection:"column",gap:4}}>
-            {tomorrowWorkout.exercises.map(ex=>{const d=EX_DETAILS[ex.id];return <div key={ex.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><span style={{fontSize:12,color:"#aaaaaa"}}>{ex.text}</span>{d?.weight&&d.weight!=="—"&&<span style={{fontSize:10,color:"#F1C40F",opacity:.8}}>{d.weight}</span>}</div>;})}
-          </div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:700,color:"#fff",marginBottom:tomorrowWorkout.exercises.length>0?8:0}}>{tomorrowWorkout.label}</div>
+          {tomorrowWorkout.exercises.map(ex=>{const d=EX[ex.id];return<div key={ex.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4}}><span style={{fontSize:12,color:"#aaaaaa"}}>{ex.text}</span>{d?.weight&&d.weight!=="—"&&<span style={{fontSize:10,color:"#F1C40F",opacity:.8}}>{d.weight}</span>}</div>;})}
         </div>
 
-        {/* Today's Tip */}
-        <div style={{background:"#0a0a18",border:"1px solid #1a1a2e",borderRadius:12,padding:16,marginBottom:16}}>
+        {/* Tip */}
+        <div style={{background:"#0a0a18",border:"1px solid #1a1a2e",borderRadius:12,padding:16}}>
           <div style={{fontSize:9,letterSpacing:2,color:"#666680",fontWeight:600,marginBottom:8}}>TODAY'S TIP</div>
-          <div style={{fontSize:13,color:"#c8c8d8",lineHeight:1.7}}>{getDailyTip(currentWeek)}</div>
+          <div style={{fontSize:13,color:"#c8c8d8",lineHeight:1.7}}>{TIPS[tipIdx]}</div>
         </div>
-
-        {isSaturday&&<div style={{display:"flex",alignItems:"center",gap:12,background:"linear-gradient(90deg,#1a1500,#252000)",border:"1px solid #F1C40F",borderRadius:10,padding:"13px 14px",color:"#F1C40F",fontSize:13}}>
-          <div style={{flex:1}}><div style={{fontWeight:700,marginBottom:2}}>Saturday — Test Day</div><div style={{fontSize:12,opacity:.85}}>Log your results in the Progress tab.</div></div>
-          <button onClick={()=>setTab("progress")} style={{background:"#F1C40F",color:"#0a0a00",border:"none",borderRadius:6,padding:"7px 12px",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,fontSize:11,cursor:"pointer",whiteSpace:"nowrap",marginLeft:"auto"}}>Log Now</button>
-        </div>}
       </div>}
 
-      {/* PROGRESS TAB */}
+      {/* ══ PROGRESS TAB ══ */}
       {tab==="progress"&&<div className="fade">
-        {isSaturday&&<div style={{display:"flex",alignItems:"center",gap:12,background:"linear-gradient(90deg,#1a1500,#252000)",border:"1px solid #F1C40F",borderRadius:10,padding:"13px 14px",marginBottom:18,color:"#F1C40F",fontSize:13}}>
-          <div><div style={{fontWeight:700}}>Saturday — Test Day</div><div style={{fontSize:12,opacity:.85}}>Green = ahead. Red = behind.</div></div>
-        </div>}
-
+        {/* Week selector */}
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#0f0f1e",border:"1px solid #1e1e35",borderRadius:10,padding:"12px 16px",marginBottom:18}}>
           <button onClick={()=>setCurrentWeek(w=>Math.max(1,w-1))} style={{background:"#1e1e35",border:"none",borderRadius:6,color:"#e8e8f0",width:36,height:36,fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>‹</button>
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:900,letterSpacing:3,color:"#fff"}}>WEEK {currentWeek} <span style={{opacity:.4,fontSize:13,fontWeight:400}}>of 10</span></div>
-          <button onClick={()=>setCurrentWeek(w=>Math.min(10,w+1))} style={{background:"#1e1e35",border:"none",borderRadius:6,color:"#e8e8f0",width:36,height:36,fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>›</button>
+          <div style={{textAlign:"center"}}>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:900,letterSpacing:3,color:"#fff"}}>WEEK {currentWeek} <span style={{opacity:.4,fontSize:13,fontWeight:400}}>of 12</span></div>
+            <div style={{fontSize:9,letterSpacing:2,color:isRunWeek(currentWeek)?"#3498DB":"#E67E22",marginTop:2}}>{isRunWeek(currentWeek)?"RUN WEEK":"STRENGTH WEEK"}</div>
+          </div>
+          <button onClick={()=>setCurrentWeek(w=>Math.min(12,w+1))} style={{background:"#1e1e35",border:"none",borderRadius:6,color:"#e8e8f0",width:36,height:36,fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>›</button>
         </div>
 
-        <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:22}}>
-          {METRICS.map(m=>{
-            const goal=WEEKS[currentWeek-1].goals[m.key],actual=actuals[currentWeek]?.[m.key],diff=getDiff(currentWeek,m.key);
-            return <div key={m.key} style={{background:"#0f0f1e",border:"1px solid #1e1e35",borderTop:`3px solid ${m.color}`,borderRadius:10,padding:14,display:"flex",flexDirection:"column",gap:6}}>
-              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:12,fontWeight:700,letterSpacing:2,color:"#666"}}>{m.label}</div>
-              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:700,color:m.color}}>{goal}<span style={{fontSize:11,opacity:.5,marginLeft:4}}>{m.unit}</span></div>
-              <input type="number" placeholder={m.key==="weight"?"Morning wt":"Actual"} value={actual??""} step={m.key==="run"||m.key==="weight"?"0.1":"1"} onChange={e=>setActual(currentWeek,m.key,e.target.value)} style={{background:"#14142a",border:"1px solid #2a2a4a",borderRadius:6,padding:"7px 10px",color:"#e8e8f0",fontFamily:"'IBM Plex Mono',monospace",fontSize:16,width:"100%",outline:"none"}}/>
-              <div style={{borderRadius:6,padding:"5px 10px",fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:700,letterSpacing:1,textAlign:"center",color:diffColor(diff),background:diffBg(diff),border:`1px solid ${diffBorder(diff)}`}}>{fmtDiff(diff,m.key)}{diff!==null&&<span style={{fontSize:10,marginLeft:3,opacity:.7}}>{m.unit}</span>}</div>
-            </div>;
-          })}
-        </div>
-
-        {/* All weeks table */}
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase"}}>All Weeks</div>
-          <div style={{fontSize:10,color:saveStatus==="saved"?"#2ECC71":"#55556a",transition:"color .3s",fontFamily:"'IBM Plex Mono',monospace"}}>{saveStatus==="saving"&&"saving"}{saveStatus==="saved"&&"saved"}</div>
-        </div>
-        <div style={{overflowX:"auto",borderRadius:10,border:"1px solid #1e1e35",marginBottom:24}}>
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-            <thead><tr>
-              <th style={{padding:"10px 6px",background:"#0f0f1e",fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,fontWeight:700,letterSpacing:2,textAlign:"center",borderBottom:"1px solid #1e1e35",color:"#aaaaaa"}}>Wk</th>
-              {METRICS.map(m=><th key={m.key} style={{padding:"10px 6px",background:"#0f0f1e",fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,fontWeight:700,letterSpacing:2,textAlign:"center",borderBottom:"1px solid #1e1e35",color:m.color,whiteSpace:"nowrap"}}>
-                {m.key==="legraises"?"Legs":m.key==="pushups"?"Push":m.key==="pullups"?"Pull":m.key==="weight"?"Wt":m.key==="dips"?"Dips":"Run"}
-              </th>)}
-            </tr></thead>
-            <tbody>{WEEKS.map(({week,goals})=><tr key={week} className="row-hover" style={{background:week===currentWeek?"#0f0f22":"transparent",cursor:"pointer"}} onClick={()=>setCurrentWeek(week)}>
-              <td style={{padding:"7px 6px",textAlign:"center",borderBottom:"1px solid #10101e",color:week===currentWeek?"#E67E22":"#aaaaaa",fontWeight:week===currentWeek?700:400}}>W{week}</td>
-              {METRICS.map(m=>{const diff=getDiff(week,m.key),actual=actuals[week]?.[m.key];return<td key={m.key} style={{padding:"7px 6px",textAlign:"center",borderBottom:"1px solid #10101e"}}>
-                <div style={{fontSize:10,opacity:.4}}>{goals[m.key]}</div>
-                {actual!==undefined&&<div style={{fontSize:12,fontWeight:700,color:diffColor(diff)}}>{fmtDiff(diff,m.key)}</div>}
-              </td>;})}
-            </tr>)}</tbody>
-          </table>
-        </div>
-        <div style={{fontSize:11,color:"#666680",marginBottom:24,textAlign:"center"}}>Tap any row to jump to that week</div>
-
-        {/* Progress chart */}
-        <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase",marginBottom:12}}>Progress Chart</div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:14}}>
-          {METRICS.map(m=><button key={m.key} onClick={()=>setGraphMetric(m.key)} style={{padding:"8px 4px",borderRadius:8,border:`1px solid ${graphMetric===m.key?m.color:"#1e1e35"}`,background:graphMetric===m.key?m.color+"18":"#0f0f1e",color:graphMetric===m.key?m.color:"#666680",fontFamily:"'IBM Plex Mono',monospace",fontSize:10,fontWeight:600,cursor:"pointer",transition:"all .15s",display:"flex",flexDirection:"column",alignItems:"center",gap:3,boxShadow:graphMetric===m.key?`0 0 12px ${m.color}30`:"none"}}>
-            <span style={{fontSize:13}}>{m.label}</span>
-          </button>)}
-        </div>
-        {(()=>{
-          const m=METRICS.find(x=>x.key===graphMetric);
-          const gv=WEEKS.map(w=>w.goals[graphMetric]),av=WEEKS.map(w=>actuals[w.week]?.[graphMetric]);
-          const hasA=av.some(v=>v!==undefined),all=[...gv,...av.filter(v=>v!==undefined)];
-          const minV=Math.min(...all)*0.92,maxV=Math.max(...all)*1.05;
-          const W=320,H=160,PL=36,PR=12,PT=12,PB=28,cW=W-PL-PR,cH=H-PT-PB;
-          const xOf=i=>PL+(i/(WEEKS.length-1))*cW,yOf=v=>PT+cH-((v-minV)/(maxV-minV))*cH;
-          const gp=gv.map((v,i)=>`${i===0?"M":"L"}${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(" ");
-          const ap=av.map((v,i)=>v!==undefined?{x:xOf(i),y:yOf(v),v,i}:null).filter(Boolean);
-          const al=ap.length>1?ap.map((p,j)=>`${j===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" "):null;
-          return <div style={{background:"#0a0a16",borderRadius:12,border:"1px solid #1a1a2e",padding:"12px 8px 8px"}}>
-            <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:W,display:"block",margin:"0 auto"}}>
-              {Array.from({length:5},(_,i)=>{const v=minV+(maxV-minV)*(i/4),y=yOf(v);return<g key={i}><line x1={PL} y1={y} x2={W-PR} y2={y} stroke="#1a1a2e" strokeWidth="1"/><text x={PL-4} y={y+4} textAnchor="end" fill="#3a3a5a" fontSize="8" fontFamily="monospace">{v.toFixed(m.key==="run"||m.key==="weight"?1:0)}</text></g>;})}
-              {WEEKS.map(({week},i)=><text key={week} x={xOf(i)} y={H-6} textAnchor="middle" fill="#3a3a5a" fontSize="8" fontFamily="monospace">W{week}</text>)}
-              <path d={gp} fill="none" stroke={m.color} strokeWidth="1.5" strokeDasharray="4,3" opacity="0.45"/>
-              {gv.map((v,i)=><circle key={i} cx={xOf(i)} cy={yOf(v)} r="2.5" fill="#0a0a16" stroke={m.color} strokeWidth="1.5" opacity="0.5"/>)}
-              {al&&<path d={al} fill="none" stroke={m.color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>}
-              {ap.map(p=><g key={p.i}><circle cx={p.x} cy={p.y} r="4" fill={m.color} stroke="#0a0a16" strokeWidth="1.5"/><text x={p.x} y={p.y-8} textAnchor="middle" fill={m.color} fontSize="8" fontFamily="monospace" fontWeight="bold">{p.v.toFixed(m.key==="run"||m.key==="weight"?1:0)}</text></g>)}
-              <line x1={xOf(currentWeek-1)} y1={PT} x2={xOf(currentWeek-1)} y2={H-PB} stroke="#E67E22" strokeWidth="1" strokeDasharray="2,2" opacity="0.4"/>
-            </svg>
-            <div style={{display:"flex",gap:16,justifyContent:"center",marginTop:6}}>
-              <div style={{display:"flex",alignItems:"center",gap:5,fontSize:10,color:"#666680"}}><svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" stroke={m.color} strokeWidth="1.5" strokeDasharray="4,3" opacity="0.5"/></svg>Goal</div>
-              <div style={{display:"flex",alignItems:"center",gap:5,fontSize:10,color:m.color}}><svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" stroke={m.color} strokeWidth="2.5"/></svg>Actual</div>
+        {isRunWeek(currentWeek)?<>
+          {/* RUN WEEK — daily time cards */}
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase",marginBottom:12}}>Week {currentWeek} Runs</div>
+          {/* Row 1: Sun 6k, Mon 8k */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:10}}>
+            {[{dk:"sun",dist:"6k",label:"Sunday"},{dk:"mon",dist:"8k",label:"Monday"}].map(({dk,dist,label})=>{
+              const actual=runWeekActuals[currentWeek]?.[dk];
+              const diff=getRunDiff(currentWeek,dist,dk);
+              const goal=getRunWeekGoal(dist,runWeekIndex(currentWeek));
+              return<div key={dk} style={{background:"#0f0f1e",border:"1px solid #1e1e35",borderTop:"3px solid #3498DB",borderRadius:10,padding:14,display:"flex",flexDirection:"column",gap:6}}>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:11,fontWeight:700,letterSpacing:2,color:"#666"}}>{label} — {dist}</div>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:700,color:"#3498DB"}}>{goal}<span style={{fontSize:10,opacity:.5,marginLeft:3}}>min goal</span></div>
+                <input type="number" placeholder="Actual (min)" value={actual??""} step="0.1"
+                  onChange={e=>setRunTime(currentWeek,dk,e.target.value)}
+                  style={{background:"#14142a",border:"1px solid #2a2a4a",borderRadius:6,padding:"7px 10px",color:"#e8e8f0",fontFamily:"'IBM Plex Mono',monospace",fontSize:16,width:"100%",outline:"none"}}/>
+                <div style={{borderRadius:6,padding:"5px 10px",fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:700,textAlign:"center",color:timeDiffColor(diff),background:timeDiffBg(diff),border:`1px solid ${timeDiffBorder(diff)}`}}>{fmtTimeDiff(diff)}</div>
+              </div>;
+            })}
+          </div>
+          {/* Row 2: Wed 10k centered */}
+          {(()=>{const dk="wed",dist="10k",label="Wednesday",actual=runWeekActuals[currentWeek]?.wed,diff=getRunDiff(currentWeek,"10k","wed"),goal=getRunWeekGoal("10k",runWeekIndex(currentWeek));return<div style={{display:"flex",justifyContent:"center",marginBottom:10}}>
+            <div style={{background:"#0f0f1e",border:"1px solid #1e1e35",borderTop:"3px solid #3498DB",borderRadius:10,padding:14,display:"flex",flexDirection:"column",gap:6,width:"calc(50% - 5px)"}}>
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:11,fontWeight:700,letterSpacing:2,color:"#666"}}>{label} — {dist}</div>
+              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:700,color:"#3498DB"}}>{goal}<span style={{fontSize:10,opacity:.5,marginLeft:3}}>min goal</span></div>
+              <input type="number" placeholder="Actual (min)" value={actual??""} step="0.1"
+                onChange={e=>setRunTime(currentWeek,"wed",e.target.value)}
+                style={{background:"#14142a",border:"1px solid #2a2a4a",borderRadius:6,padding:"7px 10px",color:"#e8e8f0",fontFamily:"'IBM Plex Mono',monospace",fontSize:16,width:"100%",outline:"none"}}/>
+              <div style={{borderRadius:6,padding:"5px 10px",fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:700,textAlign:"center",color:timeDiffColor(diff),background:timeDiffBg(diff),border:`1px solid ${timeDiffBorder(diff)}`}}>{fmtTimeDiff(diff)}</div>
             </div>
-            {!hasA&&<div style={{textAlign:"center",fontSize:10,color:"#55556a",marginTop:6}}>Log actuals on Saturdays to see your progress line</div>}
-          </div>;
-        })()}
+          </div>;})()} 
+          {/* Row 3: Thu 8k, Sat 6k */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:22}}>
+            {[{dk:"thu",dist:"8k",label:"Thursday"},{dk:"sat",dist:"6k",label:"Saturday"}].map(({dk,dist,label})=>{
+              const actual=runWeekActuals[currentWeek]?.[dk];
+              const diff=getRunDiff(currentWeek,dist,dk);
+              const goal=getRunWeekGoal(dist,runWeekIndex(currentWeek));
+              return<div key={dk} style={{background:"#0f0f1e",border:"1px solid #1e1e35",borderTop:"3px solid #3498DB",borderRadius:10,padding:14,display:"flex",flexDirection:"column",gap:6}}>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:11,fontWeight:700,letterSpacing:2,color:"#666"}}>{label} — {dist}</div>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:700,color:"#3498DB"}}>{goal}<span style={{fontSize:10,opacity:.5,marginLeft:3}}>min goal</span></div>
+                <input type="number" placeholder="Actual (min)" value={actual??""} step="0.1"
+                  onChange={e=>setRunTime(currentWeek,dk,e.target.value)}
+                  style={{background:"#14142a",border:"1px solid #2a2a4a",borderRadius:6,padding:"7px 10px",color:"#e8e8f0",fontFamily:"'IBM Plex Mono',monospace",fontSize:16,width:"100%",outline:"none"}}/>
+                <div style={{borderRadius:6,padding:"5px 10px",fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:700,textAlign:"center",color:timeDiffColor(diff),background:timeDiffBg(diff),border:`1px solid ${timeDiffBorder(diff)}`}}>{fmtTimeDiff(diff)}</div>
+              </div>;
+            })}
+          </div>
+
+          {/* Run weeks table */}
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase",marginBottom:12}}>Run Weeks</div>
+          <div style={{overflowX:"auto",borderRadius:10,border:"1px solid #1e1e35",marginBottom:16}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+              <thead><tr>
+                <th style={{padding:"10px 6px",background:"#0f0f1e",fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,fontWeight:700,letterSpacing:2,textAlign:"center",borderBottom:"1px solid #1e1e35",color:"#aaaaaa"}}>Wk</th>
+                {["6k Sun","8k Mon","10k Wed","8k Thu","6k Sat"].map(h=><th key={h} style={{padding:"10px 6px",background:"#0f0f1e",fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,fontWeight:700,letterSpacing:1,textAlign:"center",borderBottom:"1px solid #1e1e35",color:"#3498DB",whiteSpace:"nowrap"}}>{h}</th>)}
+              </tr></thead>
+              <tbody>{runWeeks.map(wk=>{
+                const rwa=runWeekActuals[wk]||{};
+                return<tr key={wk} className="row-hover" style={{background:wk===currentWeek?"#0f0f22":"transparent",cursor:"pointer"}} onClick={()=>setCurrentWeek(wk)}>
+                  <td style={{padding:"7px 6px",textAlign:"center",borderBottom:"1px solid #10101e",color:wk===currentWeek?"#E67E22":"#aaaaaa",fontWeight:wk===currentWeek?700:400}}>W{wk}</td>
+                  {[{dk:"sun",dist:"6k"},{dk:"mon",dist:"8k"},{dk:"wed",dist:"10k"},{dk:"thu",dist:"8k"},{dk:"sat",dist:"6k"}].map(({dk,dist})=>{
+                    const actual=rwa[dk];
+                    const diff=actual!==undefined?actual-getRunWeekGoal(dist,runWeekIndex(wk)):null;
+                    return<td key={dk} style={{padding:"7px 6px",textAlign:"center",borderBottom:"1px solid #10101e"}}>
+                      <div style={{fontSize:10,opacity:.4}}>{getRunWeekGoal(dist,runWeekIndex(wk))}</div>
+                      {actual!==undefined&&<div style={{fontSize:12,fontWeight:700,color:timeDiffColor(diff)}}>{fmtTimeDiff(diff)}</div>}
+                    </td>;
+                  })}
+                </tr>;
+              })}</tbody>
+            </table>
+          </div>
+
+          {/* Pace graph */}
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase",marginBottom:12}}>Pace Graph</div>
+          <PaceGraph runWeekActuals={runWeekActuals}/>
+
+          {/* Strength weeks table */}
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase",marginBottom:12,marginTop:24}}>Strength Weeks</div>
+          <StrengthTable actuals={actuals} strengthWeeks={strengthWeeks} currentWeek={currentWeek} setCurrentWeek={setCurrentWeek} getDiff={getDiff} fmtDiff={fmtDiff} diffColor={diffColor} saveStatus={saveStatus}/>
+
+        </>:<>
+          {/* STRENGTH WEEK — metric cards */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:22}}>
+            {METRICS.map(m=>{
+              const goal=getGoal(m.key,currentWeek);
+              const actual=actuals[currentWeek]?.[m.key];
+              const diff=getDiff(currentWeek,m.key);
+              if(goal===null)return null;
+              return<div key={m.key} style={{background:"#0f0f1e",border:"1px solid #1e1e35",borderTop:`3px solid ${m.color}`,borderRadius:10,padding:14,display:"flex",flexDirection:"column",gap:6}}>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:12,fontWeight:700,letterSpacing:2,color:"#666"}}>{m.label}</div>
+                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:700,color:m.color}}>{goal}<span style={{fontSize:11,opacity:.5,marginLeft:4}}>{m.unit}</span></div>
+                <input type="number" placeholder={m.key==="weight"?"Morning wt":m.key==="run5k"?"Time (min)":"Actual"} value={actual??""} step={m.key==="run5k"||m.key==="weight"?"0.1":"1"}
+                  onChange={e=>setActualFn(currentWeek,m.key,e.target.value)}
+                  style={{background:"#14142a",border:"1px solid #2a2a4a",borderRadius:6,padding:"7px 10px",color:"#e8e8f0",fontFamily:"'IBM Plex Mono',monospace",fontSize:16,width:"100%",outline:"none"}}/>
+                <div style={{borderRadius:6,padding:"5px 10px",fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:700,letterSpacing:1,textAlign:"center",color:diffColor(diff),background:diffBg(diff),border:`1px solid ${diffBorder(diff)}`}}>{fmtDiff(diff,m.key)}{diff!==null&&<span style={{fontSize:10,marginLeft:3,opacity:.7}}>{m.unit}</span>}</div>
+              </div>;
+            })}
+          </div>
+
+          {/* Strength weeks table */}
+          <StrengthTable actuals={actuals} strengthWeeks={strengthWeeks} currentWeek={currentWeek} setCurrentWeek={setCurrentWeek} getDiff={getDiff} fmtDiff={fmtDiff} diffColor={diffColor} saveStatus={saveStatus}/>
+
+          {/* Progress chart - moved above run weeks */}
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase",marginBottom:12}}>Progress Chart</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:14}}>
+            {METRICS.map(m=><button key={m.key} onClick={()=>setGraphMetric(m.key)} style={{padding:"8px 4px",borderRadius:8,border:`1px solid ${graphMetric===m.key?m.color:"#1e1e35"}`,background:graphMetric===m.key?m.color+"18":"#0f0f1e",color:graphMetric===m.key?m.color:"#666680",fontFamily:"'IBM Plex Mono',monospace",fontSize:10,fontWeight:600,cursor:"pointer",transition:"all .15s",display:"flex",flexDirection:"column",alignItems:"center",gap:3,boxShadow:graphMetric===m.key?`0 0 12px ${m.color}30`:"none"}}>
+              <span style={{fontSize:12}}>{m.label}</span>
+            </button>)}
+          </div>
+          {(()=>{
+            const m=METRICS.find(x=>x.key===graphMetric);
+            const swks=strengthWeeks;
+            const gv=swks.map(w=>getGoal(graphMetric,w)||0);
+            const av=swks.map(w=>actuals[w]?.[graphMetric]);
+            const hasA=av.some(v=>v!==undefined);
+            const all=[...gv,...av.filter(v=>v!==undefined)];
+            const minV=Math.min(...all)*0.92,maxV=Math.max(...all)*1.05;
+            const W=320,H=160,PL=36,PR=12,PT=12,PB=28,cW=W-PL-PR,cH=H-PT-PB;
+            const xOf=i=>PL+(i/(swks.length-1))*cW,yOf=v=>PT+cH-((v-minV)/(maxV-minV))*cH;
+            const gp=gv.map((v,i)=>`${i===0?"M":"L"}${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(" ");
+            const ap=av.map((v,i)=>v!==undefined?{x:xOf(i),y:yOf(v),v,i}:null).filter(Boolean);
+            const al=ap.length>1?ap.map((p,j)=>`${j===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" "):null;
+            const curIdx=swks.indexOf(currentWeek);
+            return<div style={{background:"#0a0a16",borderRadius:12,border:"1px solid #1a1a2e",padding:"12px 8px 8px",marginBottom:24}}>
+              <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:W,display:"block",margin:"0 auto"}}>
+                {Array.from({length:5},(_,i)=>{const v=minV+(maxV-minV)*(i/4),y=yOf(v);return<g key={i}><line x1={PL} y1={y} x2={W-PR} y2={y} stroke="#1a1a2e" strokeWidth="1"/><text x={PL-4} y={y+4} textAnchor="end" fill="#3a3a5a" fontSize="8" fontFamily="monospace">{v.toFixed(m.key==="run5k"||m.key==="weight"?1:0)}</text></g>;})}
+                {swks.map((w,i)=><text key={w} x={xOf(i)} y={H-6} textAnchor="middle" fill="#3a3a5a" fontSize="8" fontFamily="monospace">W{w}</text>)}
+                <path d={gp} fill="none" stroke={m.color} strokeWidth="1.5" strokeDasharray="4,3" opacity="0.45"/>
+                {gv.map((v,i)=><circle key={i} cx={xOf(i)} cy={yOf(v)} r="2.5" fill="#0a0a16" stroke={m.color} strokeWidth="1.5" opacity="0.5"/>)}
+                {al&&<path d={al} fill="none" stroke={m.color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>}
+                {ap.map(p=><g key={p.i}><circle cx={p.x} cy={p.y} r="4" fill={m.color} stroke="#0a0a16" strokeWidth="1.5"/><text x={p.x} y={p.y-8} textAnchor="middle" fill={m.color} fontSize="8" fontFamily="monospace" fontWeight="bold">{p.v.toFixed(m.key==="run5k"||m.key==="weight"?1:0)}</text></g>)}
+                {curIdx>=0&&<line x1={xOf(curIdx)} y1={PT} x2={xOf(curIdx)} y2={H-PB} stroke="#E67E22" strokeWidth="1" strokeDasharray="2,2" opacity="0.4"/>}
+              </svg>
+              <div style={{display:"flex",gap:16,justifyContent:"center",marginTop:6}}>
+                <div style={{display:"flex",alignItems:"center",gap:5,fontSize:10,color:"#666680"}}><svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" stroke={m.color} strokeWidth="1.5" strokeDasharray="4,3" opacity="0.5"/></svg>Goal</div>
+                <div style={{display:"flex",alignItems:"center",gap:5,fontSize:10,color:m.color}}><svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" stroke={m.color} strokeWidth="2.5"/></svg>Actual</div>
+              </div>
+              {!hasA&&<div style={{textAlign:"center",fontSize:10,color:"#55556a",marginTop:6}}>Log actuals to see your progress line</div>}
+            </div>;
+          })()}
+
+          {/* Run weeks table */}
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase",marginBottom:12,marginTop:8}}>Run Weeks</div>
+          <div style={{overflowX:"auto",borderRadius:10,border:"1px solid #1e1e35",marginBottom:24}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+              <thead><tr>
+                <th style={{padding:"10px 6px",background:"#0f0f1e",fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,fontWeight:700,letterSpacing:2,textAlign:"center",borderBottom:"1px solid #1e1e35",color:"#aaaaaa"}}>Wk</th>
+                {["6k Sun","8k Mon","10k Wed","8k Thu","6k Sat"].map(h=><th key={h} style={{padding:"10px 6px",background:"#0f0f1e",fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,fontWeight:700,letterSpacing:1,textAlign:"center",borderBottom:"1px solid #1e1e35",color:"#3498DB",whiteSpace:"nowrap"}}>{h}</th>)}
+              </tr></thead>
+              <tbody>{runWeeks.map(wk=>{
+                const rwa=runWeekActuals[wk]||{};
+                return<tr key={wk} className="row-hover" style={{background:"transparent",cursor:"pointer"}} onClick={()=>setCurrentWeek(wk)}>
+                  <td style={{padding:"7px 6px",textAlign:"center",borderBottom:"1px solid #10101e",color:"#aaaaaa"}}>W{wk}</td>
+                  {[{dk:"sun",dist:"6k"},{dk:"mon",dist:"8k"},{dk:"wed",dist:"10k"},{dk:"thu",dist:"8k"},{dk:"sat",dist:"6k"}].map(({dk,dist})=>{
+                    const actual=rwa[dk];
+                    const diff=actual!==undefined?actual-getRunWeekGoal(dist,runWeekIndex(wk)):null;
+                    return<td key={dk} style={{padding:"7px 6px",textAlign:"center",borderBottom:"1px solid #10101e"}}>
+                      <div style={{fontSize:10,opacity:.4}}>{getRunWeekGoal(dist,runWeekIndex(wk))}</div>
+                      {actual!==undefined&&<div style={{fontSize:12,fontWeight:700,color:timeDiffColor(diff)}}>{fmtTimeDiff(diff)}</div>}
+                    </td>;
+                  })}
+                </tr>;
+              })}</tbody>
+            </table>
+          </div>
+
+          {/* Pace graph */}
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase",marginBottom:12}}>Pace Graph</div>
+          <PaceGraph runWeekActuals={runWeekActuals}/>
+
+          {/* Progress chart */}
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase",marginBottom:12,marginTop:24}}>Progress Chart</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:14}}>
+            {METRICS.map(m=><button key={m.key} onClick={()=>setGraphMetric(m.key)} style={{padding:"8px 4px",borderRadius:8,border:`1px solid ${graphMetric===m.key?m.color:"#1e1e35"}`,background:graphMetric===m.key?m.color+"18":"#0f0f1e",color:graphMetric===m.key?m.color:"#666680",fontFamily:"'IBM Plex Mono',monospace",fontSize:10,fontWeight:600,cursor:"pointer",transition:"all .15s",display:"flex",flexDirection:"column",alignItems:"center",gap:3,boxShadow:graphMetric===m.key?`0 0 12px ${m.color}30`:"none"}}>
+              <span style={{fontSize:12}}>{m.label}</span>
+            </button>)}
+          </div>
+          {(()=>{
+            const m=METRICS.find(x=>x.key===graphMetric);
+            const swks=strengthWeeks;
+            const gv=swks.map(w=>getGoal(graphMetric,w)||0);
+            const av=swks.map(w=>actuals[w]?.[graphMetric]);
+            const hasA=av.some(v=>v!==undefined);
+            const all=[...gv,...av.filter(v=>v!==undefined)];
+            const minV=Math.min(...all)*0.92,maxV=Math.max(...all)*1.05;
+            const W=320,H=160,PL=36,PR=12,PT=12,PB=28,cW=W-PL-PR,cH=H-PT-PB;
+            const xOf=i=>PL+(i/(swks.length-1))*cW,yOf=v=>PT+cH-((v-minV)/(maxV-minV))*cH;
+            const gp=gv.map((v,i)=>`${i===0?"M":"L"}${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(" ");
+            const ap=av.map((v,i)=>v!==undefined?{x:xOf(i),y:yOf(v),v,i}:null).filter(Boolean);
+            const al=ap.length>1?ap.map((p,j)=>`${j===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" "):null;
+            const curIdx=swks.indexOf(currentWeek);
+            return<div style={{background:"#0a0a16",borderRadius:12,border:"1px solid #1a1a2e",padding:"12px 8px 8px"}}>
+              <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:W,display:"block",margin:"0 auto"}}>
+                {Array.from({length:5},(_,i)=>{const v=minV+(maxV-minV)*(i/4),y=yOf(v);return<g key={i}><line x1={PL} y1={y} x2={W-PR} y2={y} stroke="#1a1a2e" strokeWidth="1"/><text x={PL-4} y={y+4} textAnchor="end" fill="#3a3a5a" fontSize="8" fontFamily="monospace">{v.toFixed(m.key==="run5k"||m.key==="weight"?1:0)}</text></g>;})}
+                {swks.map((w,i)=><text key={w} x={xOf(i)} y={H-6} textAnchor="middle" fill="#3a3a5a" fontSize="8" fontFamily="monospace">W{w}</text>)}
+                <path d={gp} fill="none" stroke={m.color} strokeWidth="1.5" strokeDasharray="4,3" opacity="0.45"/>
+                {gv.map((v,i)=><circle key={i} cx={xOf(i)} cy={yOf(v)} r="2.5" fill="#0a0a16" stroke={m.color} strokeWidth="1.5" opacity="0.5"/>)}
+                {al&&<path d={al} fill="none" stroke={m.color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>}
+                {ap.map(p=><g key={p.i}><circle cx={p.x} cy={p.y} r="4" fill={m.color} stroke="#0a0a16" strokeWidth="1.5"/><text x={p.x} y={p.y-8} textAnchor="middle" fill={m.color} fontSize="8" fontFamily="monospace" fontWeight="bold">{p.v.toFixed(m.key==="run5k"||m.key==="weight"?1:0)}</text></g>)}
+                {curIdx>=0&&<line x1={xOf(curIdx)} y1={PT} x2={xOf(curIdx)} y2={H-PB} stroke="#E67E22" strokeWidth="1" strokeDasharray="2,2" opacity="0.4"/>}
+              </svg>
+              <div style={{display:"flex",gap:16,justifyContent:"center",marginTop:6}}>
+                <div style={{display:"flex",alignItems:"center",gap:5,fontSize:10,color:"#666680"}}><svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" stroke={m.color} strokeWidth="1.5" strokeDasharray="4,3" opacity="0.5"/></svg>Goal</div>
+                <div style={{display:"flex",alignItems:"center",gap:5,fontSize:10,color:m.color}}><svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" stroke={m.color} strokeWidth="2.5"/></svg>Actual</div>
+              </div>
+              {!hasA&&<div style={{textAlign:"center",fontSize:10,color:"#55556a",marginTop:6}}>Log actuals to see your progress line</div>}
+            </div>;
+          })()}
+        </>}
       </div>}
 
-      {/* NUTRITION TAB */}
+      {/* ══ NUTRITION TAB ══ */}
       {tab==="nutrition"&&<div className="fade">
-        {/* Totals */}
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:20}}>
-          {[{label:"CALORIES",val:totalCal,goal:CAL_GOAL,color:"#3498DB",unit:"cal"},{label:"PROTEIN",val:totalProt,goal:PROT_GOAL,color:"#E67E22",unit:"g"}].map(m=>{
-            const left=m.goal-m.val,over=m.val>m.goal;
-            return <div key={m.label} style={{background:"#0f0f1e",border:`1px solid ${m.color}33`,borderTop:`3px solid ${m.color}`,borderRadius:10,padding:14}}>
-              <div style={{fontSize:9,letterSpacing:2,color:"#666",fontWeight:600,marginBottom:6}}>{m.label}</div>
-              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:28,fontWeight:700,color:over?"#E74C3C":m.color,lineHeight:1}}>{Math.round(m.val)}<span style={{fontSize:12,opacity:.6,marginLeft:3}}>{m.unit}</span></div>
-              <div style={{fontSize:10,color:over?"#E74C3C":"#555",marginTop:4}}>{over?`${Math.abs(Math.round(left))}${m.unit} over`:`${Math.abs(Math.round(left))}${m.unit} left`}</div>
-              <div style={{height:3,background:"#1a1a2e",borderRadius:2,overflow:"hidden",marginTop:8}}><div style={{height:"100%",borderRadius:2,background:over?"#E74C3C":m.color,width:`${Math.min(100,(m.val/m.goal)*100)}%`,transition:"width .4s ease"}}/></div>
-            </div>;
-          })}
-        </div>
 
-        {/* Food input */}
-        <div style={{background:"#0f0f1e",border:"1px solid #1e1e35",borderRadius:12,padding:14,marginBottom:16}}>
-          <div style={{fontSize:9,letterSpacing:2,color:"#666680",fontWeight:600,marginBottom:10}}>LOG FOOD</div>
-          <div style={{display:"flex",gap:8,marginBottom:8}}>
-            <input value={nutInput} onChange={e=>setNutInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&lookupNutrition()}
-              placeholder="e.g. Wendy's Dave's Double meal"
-              style={{flex:1,background:"#0a0a18",border:"1px solid #2a2a4a",borderRadius:8,padding:"10px 12px",color:"#e8e8f0",fontFamily:"'IBM Plex Mono',monospace",fontSize:14,outline:"none"}}/>
-            <button onClick={lookupNutrition} disabled={nutLoading||!nutInput.trim()}
-              style={{background:"#E67E22",border:"none",borderRadius:8,padding:"0 16px",color:"#000",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,fontSize:13,cursor:"pointer",flexShrink:0,opacity:nutLoading||!nutInput.trim()?0.5:1}}>
-              {nutLoading?"...":"Add"}
-            </button>
+
+        {/* Day selector */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#0f0f1e",border:"1px solid #1e1e35",borderRadius:10,padding:"10px 14px",marginBottom:16}}>
+          <button onClick={()=>{const d=new Date(nutDay);d.setDate(d.getDate()-1);setNutDay(dateKey(d));}}
+            style={{background:"#1e1e35",border:"none",borderRadius:6,color:"#e8e8f0",width:32,height:32,fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>‹</button>
+          <div style={{textAlign:"center"}}>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:"#fff"}}>
+              {nutDay===todayKey?"Today":nutDay===dateKey(new Date(Date.now()-86400000))?"Yesterday":new Date(nutDay+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}
+            </div>
+            {nutDay!==todayKey&&<button onClick={()=>setNutDay(todayKey)} style={{background:"transparent",border:"none",color:"#E67E22",fontFamily:"'IBM Plex Mono',monospace",fontSize:10,cursor:"pointer",marginTop:2}}>back to today</button>}
           </div>
-          {nutError&&<div style={{fontSize:11,color:"#E74C3C",lineHeight:1.5}}>{nutError}</div>}
+          <button onClick={()=>{const d=new Date(nutDay);d.setDate(d.getDate()+1);const next=dateKey(d);if(next<=todayKey)setNutDay(next);}}
+            style={{background:"#1e1e35",border:"none",borderRadius:6,color:nutDay>=todayKey?"#333":"#e8e8f0",width:32,height:32,fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>›</button>
         </div>
 
-        {/* Food log list */}
-        {nutLog.length>0&&<div style={{marginBottom:20}}>
-          <div style={{fontSize:9,letterSpacing:2,color:"#666680",fontWeight:600,marginBottom:10}}>TODAY'S LOG</div>
-          <div style={{display:"flex",flexDirection:"column",gap:6}}>
-            {nutLog.map(entry=><div key={entry.id} style={{display:"flex",alignItems:"center",gap:10,background:"#0f0f1e",border:"1px solid #1e1e35",borderRadius:8,padding:"10px 12px"}}>
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:13,color:"#ccc",marginBottom:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{entry.desc}</div>
-                <div style={{fontSize:10,color:"#444"}}>{entry.time}</div>
-              </div>
-              <div style={{display:"flex",gap:12,alignItems:"center",flexShrink:0}}>
-                <div style={{textAlign:"right"}}>
-                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:"#3498DB"}}>{entry.cal}<span style={{fontSize:9,opacity:.6}}>cal</span></div>
-                  <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:14,fontWeight:700,color:"#E67E22"}}>{entry.prot}<span style={{fontSize:9,opacity:.6}}>g</span></div>
-                </div>
-                <button onClick={()=>setNutLog(p=>p.filter(e=>e.id!==entry.id))} style={{background:"none",border:"none",color:"#E74C3C",fontSize:16,cursor:"pointer",padding:"0 2px",opacity:.6}}>x</button>
-              </div>
-            </div>)}
-            <div style={{display:"flex",justifyContent:"space-between",padding:"8px 12px",borderTop:"1px solid #1e1e35",marginTop:4}}>
-              <div style={{fontSize:9,letterSpacing:2,color:"#444",fontWeight:600}}>TOTAL</div>
-              <div style={{display:"flex",gap:12}}>
-                <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:"#3498DB"}}>{totalCal}<span style={{fontSize:9,opacity:.6}}>cal</span></span>
-                <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:"#E67E22"}}>{totalProt}<span style={{fontSize:9,opacity:.6}}>g</span></span>
+        {/* Daily totals input */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:20}}>
+          {[{label:"CALORIES TODAY",val:nutCal,set:setNutCal,color:"#3498DB",unit:"kcal",goal:CAL_GOAL},{label:"PROTEIN TODAY",val:nutProt,set:setNutProt,color:"#E67E22",unit:"g",goal:PROT_GOAL}].map(f=>(
+            <div key={f.label} style={{background:"#0f0f1e",border:`1px solid ${f.color}33`,borderTop:`3px solid ${f.color}`,borderRadius:10,padding:14}}>
+              <div style={{fontSize:9,letterSpacing:2,color:"#666",fontWeight:600,marginBottom:8}}>{f.label}</div>
+              <input type="number" value={f.val} onChange={e=>{f.set(e.target.value);}} placeholder={f.unit}
+                style={{width:"100%",background:"#0a0a18",border:`1px solid ${f.color}44`,borderRadius:6,padding:"8px 10px",color:"#e8e8f0",fontFamily:"'IBM Plex Mono',monospace",fontSize:16,outline:"none",marginBottom:8}}/>
+              <div style={{fontSize:10,color:"#555"}}>{f.goal} {f.unit} goal</div>
+              <div style={{height:3,background:"#1a1a2e",borderRadius:2,overflow:"hidden",marginTop:6}}>
+                <div style={{height:"100%",borderRadius:2,background:parseFloat(f.val||0)>f.goal?"#E74C3C":f.color,width:`${Math.min(100,(parseFloat(f.val||0)/f.goal)*100)}%`,transition:"width .3s ease"}}/>
               </div>
             </div>
-          </div>
-        </div>}
+          ))}
+        </div>
 
-        {/* Current week graph */}
+        {/* Weekly graph */}
         <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase",marginBottom:12}}>Weekly Nutrition</div>
-        <NutritionGraph weekData={currentWeekNutData()} weekLabel={`Week ${currentWeek}`} isCurrent={true}/>
-
-        {/* Previous weeks */}
-        {prevWeeksNutData().length>0&&<div style={{marginTop:16}}>
+        <NutritionGraph weekData={getNutWeekData(currentWeek)} weekLabel={`Week ${currentWeek}`} isCurrent={true}/>
+        {currentWeek>1&&<div style={{marginTop:16}}>
           <div style={{fontSize:9,letterSpacing:2,color:"#444",fontWeight:600,marginBottom:10}}>PREVIOUS WEEKS</div>
-          {prevWeeksNutData().map(({label,data})=><NutritionGraph key={label} weekData={data} weekLabel={label} isCurrent={false}/>)}
+          {Array.from({length:Math.min(3,currentWeek-1)},(_,i)=>currentWeek-1-i).map(w=><NutritionGraph key={w} weekData={getNutWeekData(w)} weekLabel={`Week ${w}`} isCurrent={false}/>)}
         </div>}
       </div>}
 
     </div>
   </div>;
+}
+
+// ── Strength table extracted as component ─────────────────────────────────────
+function StrengthTable({actuals,strengthWeeks,currentWeek,setCurrentWeek,getDiff,fmtDiff,diffColor,saveStatus}){
+  return<>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+      <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase"}}>Strength Weeks</div>
+      <div style={{fontSize:10,color:saveStatus==="saved"?"#2ECC71":"#55556a",transition:"color .3s",fontFamily:"'IBM Plex Mono',monospace"}}>{saveStatus==="saving"&&"saving"}{saveStatus==="saved"&&"saved"}</div>
+    </div>
+    <div style={{overflowX:"auto",borderRadius:10,border:"1px solid #1e1e35",marginBottom:8}}>
+      <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+        <thead><tr>
+          <th style={{padding:"10px 6px",background:"#0f0f1e",fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,fontWeight:700,letterSpacing:2,textAlign:"center",borderBottom:"1px solid #1e1e35",color:"#aaaaaa"}}>Wk</th>
+          {METRICS.map(m=><th key={m.key} style={{padding:"10px 6px",background:"#0f0f1e",fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,fontWeight:700,letterSpacing:1,textAlign:"center",borderBottom:"1px solid #1e1e35",color:m.color,whiteSpace:"nowrap"}}>
+            {m.key==="legraises"?"Legs":m.key==="pushups"?"Push":m.key==="pullups"?"Pull":m.key==="weight"?"Wt":m.key==="dips"?"Dips":"5k"}
+          </th>)}
+        </tr></thead>
+        <tbody>{strengthWeeks.map(wk=><tr key={wk} className="row-hover" style={{background:wk===currentWeek?"#0f0f22":"transparent",cursor:"pointer"}} onClick={()=>setCurrentWeek(wk)}>
+          <td style={{padding:"7px 6px",textAlign:"center",borderBottom:"1px solid #10101e",color:wk===currentWeek?"#E67E22":"#aaaaaa",fontWeight:wk===currentWeek?700:400}}>W{wk}</td>
+          {METRICS.map(m=>{
+            const diff=getDiff(wk,m.key),actual=actuals[wk]?.[m.key];
+            return<td key={m.key} style={{padding:"7px 6px",textAlign:"center",borderBottom:"1px solid #10101e"}}>
+              <div style={{fontSize:10,opacity:.4}}>{getGoal(m.key,wk)}</div>
+              {actual!==undefined&&<div style={{fontSize:12,fontWeight:700,color:diffColor(diff)}}>{fmtDiff(diff,m.key)}</div>}
+            </td>;
+          })}
+        </tr>)}</tbody>
+      </table>
+    </div>
+    <div style={{fontSize:11,color:"#666680",marginBottom:24,textAlign:"center"}}>Tap any row to jump to that week</div>
+  </>;
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
