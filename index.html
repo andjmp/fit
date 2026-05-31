@@ -126,8 +126,8 @@ const STRENGTH_WORKOUTS = {
     exercises:[{id:"squat",text:"Squats"},{id:"bss",text:"Bulgarian Split Squat"},{id:"calf",text:"Calf Raises"},{id:"pistol",text:"Pistol Squat Practice"}]},
   Saturday:  {label:"Push — Max Day", color:"#E67E22", skipPushups:true, isMaxDay:true,
     exercises:[{id:"ohp",text:"Overhead Press"},{id:"fly",text:"Chest Fly Machine"},{id:"dips",text:"Dips"},{id:"legr",text:"Leg Raises"},{id:"pushup",text:"Push-Ups — Max Test"}]},
-  Sunday:    {label:"Pull — Max Day", color:"#E74C3C", isMaxDay:true,
-    exercises:[{id:"pull",text:"Pull-Ups — Max Test"},{id:"hcurl",text:"Hammer Curls"},{id:"curl",text:"Regular Curls"},{id:"lat",text:"Lateral Raises"}]},
+  Sunday:    {label:"Pull + Biceps", color:"#E74C3C",
+    exercises:[{id:"pull",text:"Pull-Ups — FIRST"},{id:"hcurl",text:"Hammer Curls"},{id:"curl",text:"Regular Curls"},{id:"legr",text:"Leg Raises"}]},
 };
 
 // Run week workouts
@@ -659,7 +659,6 @@ function App(){
           <PaceGraph runWeekActuals={runWeekActuals}/>
 
           {/* Strength weeks table */}
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase",marginBottom:12,marginTop:24}}>Strength Weeks</div>
           <StrengthTable actuals={actuals} strengthWeeks={strengthWeeks} currentWeek={currentWeek} setCurrentWeek={setCurrentWeek} getDiff={getDiff} fmtDiff={fmtDiff} diffColor={diffColor} saveStatus={saveStatus}/>
 
         </>:<>
@@ -752,44 +751,6 @@ function App(){
           <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase",marginBottom:12}}>Pace Graph</div>
           <PaceGraph runWeekActuals={runWeekActuals}/>
 
-          {/* Progress chart */}
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase",marginBottom:12,marginTop:24}}>Progress Chart</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:14}}>
-            {METRICS.map(m=><button key={m.key} onClick={()=>setGraphMetric(m.key)} style={{padding:"8px 4px",borderRadius:8,border:`1px solid ${graphMetric===m.key?m.color:"#1e1e35"}`,background:graphMetric===m.key?m.color+"18":"#0f0f1e",color:graphMetric===m.key?m.color:"#666680",fontFamily:"'IBM Plex Mono',monospace",fontSize:10,fontWeight:600,cursor:"pointer",transition:"all .15s",display:"flex",flexDirection:"column",alignItems:"center",gap:3,boxShadow:graphMetric===m.key?`0 0 12px ${m.color}30`:"none"}}>
-              <span style={{fontSize:12}}>{m.label}</span>
-            </button>)}
-          </div>
-          {(()=>{
-            const m=METRICS.find(x=>x.key===graphMetric);
-            const swks=strengthWeeks;
-            const gv=swks.map(w=>getGoal(graphMetric,w)||0);
-            const av=swks.map(w=>actuals[w]?.[graphMetric]);
-            const hasA=av.some(v=>v!==undefined);
-            const all=[...gv,...av.filter(v=>v!==undefined)];
-            const minV=Math.min(...all)*0.92,maxV=Math.max(...all)*1.05;
-            const W=320,H=160,PL=36,PR=12,PT=12,PB=28,cW=W-PL-PR,cH=H-PT-PB;
-            const xOf=i=>PL+(i/(swks.length-1))*cW,yOf=v=>PT+cH-((v-minV)/(maxV-minV))*cH;
-            const gp=gv.map((v,i)=>`${i===0?"M":"L"}${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(" ");
-            const ap=av.map((v,i)=>v!==undefined?{x:xOf(i),y:yOf(v),v,i}:null).filter(Boolean);
-            const al=ap.length>1?ap.map((p,j)=>`${j===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" "):null;
-            const curIdx=swks.indexOf(currentWeek);
-            return<div style={{background:"#0a0a16",borderRadius:12,border:"1px solid #1a1a2e",padding:"12px 8px 8px"}}>
-              <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:W,display:"block",margin:"0 auto"}}>
-                {Array.from({length:5},(_,i)=>{const v=minV+(maxV-minV)*(i/4),y=yOf(v);return<g key={i}><line x1={PL} y1={y} x2={W-PR} y2={y} stroke="#1a1a2e" strokeWidth="1"/><text x={PL-4} y={y+4} textAnchor="end" fill="#3a3a5a" fontSize="8" fontFamily="monospace">{v.toFixed(m.key==="run5k"||m.key==="weight"?1:0)}</text></g>;})}
-                {swks.map((w,i)=><text key={w} x={xOf(i)} y={H-6} textAnchor="middle" fill="#3a3a5a" fontSize="8" fontFamily="monospace">W{w}</text>)}
-                <path d={gp} fill="none" stroke={m.color} strokeWidth="1.5" strokeDasharray="4,3" opacity="0.45"/>
-                {gv.map((v,i)=><circle key={i} cx={xOf(i)} cy={yOf(v)} r="2.5" fill="#0a0a16" stroke={m.color} strokeWidth="1.5" opacity="0.5"/>)}
-                {al&&<path d={al} fill="none" stroke={m.color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>}
-                {ap.map(p=><g key={p.i}><circle cx={p.x} cy={p.y} r="4" fill={m.color} stroke="#0a0a16" strokeWidth="1.5"/><text x={p.x} y={p.y-8} textAnchor="middle" fill={m.color} fontSize="8" fontFamily="monospace" fontWeight="bold">{p.v.toFixed(m.key==="run5k"||m.key==="weight"?1:0)}</text></g>)}
-                {curIdx>=0&&<line x1={xOf(curIdx)} y1={PT} x2={xOf(curIdx)} y2={H-PB} stroke="#E67E22" strokeWidth="1" strokeDasharray="2,2" opacity="0.4"/>}
-              </svg>
-              <div style={{display:"flex",gap:16,justifyContent:"center",marginTop:6}}>
-                <div style={{display:"flex",alignItems:"center",gap:5,fontSize:10,color:"#666680"}}><svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" stroke={m.color} strokeWidth="1.5" strokeDasharray="4,3" opacity="0.5"/></svg>Goal</div>
-                <div style={{display:"flex",alignItems:"center",gap:5,fontSize:10,color:m.color}}><svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" stroke={m.color} strokeWidth="2.5"/></svg>Actual</div>
-              </div>
-              {!hasA&&<div style={{textAlign:"center",fontSize:10,color:"#55556a",marginTop:6}}>Log actuals to see your progress line</div>}
-            </div>;
-          })()}
         </>}
       </div>}
 
