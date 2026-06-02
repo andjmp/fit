@@ -36,8 +36,25 @@ const { useState, useEffect, useRef } = React;
 const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
 const DAY_SHORT = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const CAL_GOAL = 3100, PROT_GOAL = 165;
-const PU_WEEK_REPS = [8,10,12,14,16,18,20,22,25,28,30,32];
+const PU_WEEK_REPS = [20,22,24,25,26,27,28,29,30,31,32,33];
 const PROGRAM_START = new Date("2026-06-01");
+
+// Weight progressions: [wks1-3, wks5-7, wks9-11]
+// Run weeks (4,8,12) don't advance progression
+function getWeight(exKey, weekNum){
+  const phase = weekNum <= 3 ? 0 : weekNum <= 7 ? 1 : 2;
+  const weights = {
+    ohp:    ["25 lbs","30 lbs","35 lbs"],
+    fly:    ["70 lbs","80 lbs","90 lbs"],
+    squat:  ["25 lb dumbbells","35 lb dumbbells","45 lb dumbbells"],
+    bss:    ["Bodyweight","10 lb dumbbells","20 lb dumbbells"],
+    calf:   ["35 lbs","40 lbs","45 lbs"],
+    hcurl:  ["25 lbs","30 lbs","35 lbs"],
+    curl:   ["25 lbs","30 lbs","35 lbs"],
+    lat:    ["15 lbs","15 lbs","20 lbs"],
+  };
+  return weights[exKey]?.[phase] || null;
+}
 
 // Week type: 1-3=strength, 4=run, 5-7=strength, 8=run, 9-11=strength, 12=run
 const isRunWeek = w => w === 4 || w === 8 || w === 12;
@@ -195,7 +212,7 @@ function RestTimer({restStr,color}){
 }
 
 // ── Exercise overlay ──────────────────────────────────────────────────────────
-function ExOverlay({ex,color,label,repChecked,onRepCheck,onClose,onAllDone}){
+function ExOverlay({ex,color,label,repChecked,onRepCheck,onClose,onAllDone,weekNum}){
   const d=EX[ex.id]; if(!d)return null;
   const totalSets=d.sets.length;
   const allSetsDone=totalSets>0&&d.sets.every((_,si)=>repChecked[`${ex.id}_s${si}`]);
@@ -210,10 +227,10 @@ function ExOverlay({ex,color,label,repChecked,onRepCheck,onClose,onAllDone}){
           </div>
           <button onClick={onClose} style={{background:"#1a1a2e",border:"none",borderRadius:"50%",width:30,height:30,color:"#666",fontSize:14,cursor:"pointer",flexShrink:0}}>x</button>
         </div>
-        {d.weight&&d.weight!=="—"&&<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#14120a",border:"1px solid #2a2200",borderRadius:8,padding:"10px 14px",marginBottom:12}}>
+        {(()=>{const w=getWeight(ex.id,weekNum)||d.weight;return w&&w!=="—"?<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#14120a",border:"1px solid #2a2200",borderRadius:8,padding:"10px 14px",marginBottom:12}}>
           <span style={{fontSize:9,letterSpacing:2,color:"#444",fontWeight:600}}>WEIGHT</span>
-          <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:"#F1C40F"}}>{d.weight}</span>
-        </div>}
+          <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:"#F1C40F"}}>{w}</span>
+        </div>:null;})()}
         <div style={{fontSize:12,color:"#aaaaaa",lineHeight:1.6,background:"#080810",borderRadius:8,padding:"10px 12px",marginBottom:14}}>{d.notes}</div>
         <RestTimer restStr={d.rest} color={color}/>
         {totalSets>0&&<div style={{marginBottom:14}}>
@@ -346,7 +363,7 @@ function App(){
     // Load today's nutrition values
     const nutData=LS.get("ft_nut_all")||{};
     const todayNut=nutData[todayKey];
-    if(todayNut){if(todayNut.cal!==undefined)setNutCal(String(todayNut.cal));if(todayNut.prot!==undefined)setNutProt(String(todayNut.prot));}
+    if(todayNut){if(todayNut.cal)setNutCal(String(todayNut.cal));if(todayNut.prot)setNutProt(String(todayNut.prot));}
     loaded.current=true;
   },[]);
 
@@ -354,20 +371,20 @@ function App(){
   useEffect(()=>{if(!loaded.current)return;if(Object.keys(actuals).length===0)return;setSaveStatus("saving");const t=setTimeout(()=>{LS.set("ft_actuals",actuals);setSaveStatus("saved");setTimeout(()=>setSaveStatus(""),1800);},600);return()=>clearTimeout(t);},[actuals]);
   useEffect(()=>{if(!loaded.current)return;LS.set("ft_runweek_actuals",runWeekActuals);},[runWeekActuals]);
   useEffect(()=>{if(!loaded.current)return;const t=setTimeout(()=>{LS.set("ft_daily_"+todayKey,{checked,repChecked,puSets});},400);return()=>clearTimeout(t);},[checked,repChecked,puSets]);
+
+  // Save nutrition — only when user actually changes values, not on nutDay change
   useEffect(()=>{
     if(!loaded.current)return;
     const cal=parseFloat(nutCal)||0, prot=parseFloat(nutProt)||0;
-    // Save to per-day store
     const allNut=LS.get("ft_nut_all")||{};
     allNut[nutDay]={cal,prot};
     LS.set("ft_nut_all",allNut);
-    // Update weekly nutrition summary for graph
     if(cal||prot){
       setAllNutWeeks(prev=>{const next={...prev,["w"+currentWeek]:{...(prev["w"+currentWeek]||{}),[nutDay]:{cal,prot}}};LS.set("ft_nutweeks",next);return next;});
     }
-  },[nutCal,nutProt,nutDay]);
+  },[nutCal,nutProt]);
 
-  // When nutDay changes, load values for that day
+  // When nutDay changes, load that day's values (separate from save)
   useEffect(()=>{
     if(!loaded.current)return;
     const allNut=LS.get("ft_nut_all")||{};
@@ -449,7 +466,7 @@ function App(){
   const tipIdx=(currentWeek-1)%TIPS.length;
 
   return<div style={{minHeight:"100vh",background:"#0a0a12",fontFamily:"'IBM Plex Mono',monospace",color:"#e8e8f0"}}>
-    {overlayEx&&<ExOverlay ex={overlayEx} color={workout.color} label={workout.label} repChecked={repChecked} onRepCheck={key=>setRepChecked(p=>({...p,[key]:!p[key]}))} onClose={()=>setOverlay(null)} onAllDone={markAllSetsDone}/>}
+    {overlayEx&&<ExOverlay ex={overlayEx} color={workout.color} label={workout.label} repChecked={repChecked} onRepCheck={key=>setRepChecked(p=>({...p,[key]:!p[key]}))} onClose={()=>setOverlay(null)} onAllDone={markAllSetsDone} weekNum={currentWeek}/>}
 
     {/* Header */}
     <div style={{position:"sticky",top:0,zIndex:10,background:"rgba(10,10,18,.97)",backdropFilter:"blur(12px)",borderBottom:"1px solid #1a1a2e",padding:"14px 16px 0"}}>
@@ -517,7 +534,7 @@ function App(){
                   <div style={{fontSize:13,lineHeight:1.4,color:checked[ex.id]?"#55556a":"#c8c8d8",textDecoration:checked[ex.id]?"line-through":"none"}}>{ex.text}</div>
                   <div style={{display:"flex",gap:8,alignItems:"center",marginTop:2}}>
                     {d?.sets.length>0&&<span style={{fontSize:9,color:"#666680"}}>{d.sets.length}x{d.sets[0].r}</span>}
-                    {d?.weight&&d.weight!=="—"&&d.weight!=="Bodyweight"&&<span style={{fontSize:9,color:"#5a5020"}}>· {d.weight}</span>}
+                    {(()=>{const w=getWeight(ex.id,currentWeek)||d?.weight;return w&&w!=="—"&&w!=="Bodyweight"?<span style={{fontSize:9,color:"#5a5020"}}>· {w}</span>:null;})()}
                     {setsTotal>0&&setsDone>0&&<span style={{fontSize:9,color:setsDone===setsTotal?"#2ECC71":"#4a6a4a"}}>{setsDone}/{setsTotal}</span>}
                   </div>
                 </div>
@@ -560,7 +577,7 @@ function App(){
         <div style={{background:"#0f0f1e",border:"1px solid #1e1e35",borderLeft:`3px solid ${tomorrowWorkout.color}`,borderRadius:12,padding:16,marginBottom:16}}>
           <div style={{fontSize:9,letterSpacing:2,color:"#666680",marginBottom:6,fontWeight:600}}>UP NEXT — {tomorrowDay.toUpperCase()}</div>
           <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:700,color:"#fff",marginBottom:tomorrowWorkout.exercises.length>0?8:0}}>{tomorrowWorkout.label}</div>
-          {tomorrowWorkout.exercises.map(ex=>{const d=EX[ex.id];return<div key={ex.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4}}><span style={{fontSize:12,color:"#aaaaaa"}}>{ex.text}</span>{d?.weight&&d.weight!=="—"&&<span style={{fontSize:10,color:"#F1C40F",opacity:.8}}>{d.weight}</span>}</div>;})}
+          {tomorrowWorkout.exercises.map(ex=>{const d=EX[ex.id];return<div key={ex.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4}}><span style={{fontSize:12,color:"#aaaaaa"}}>{ex.text}</span>{(()=>{const w=getWeight(ex.id,currentWeek)||d?.weight;return w&&w!=="—"?<span style={{fontSize:10,color:"#F1C40F",opacity:.8}}>{w}</span>:null;})()}</div>;})}
         </div>
 
         {/* Tip */}
