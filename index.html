@@ -540,9 +540,10 @@ function App(){
     }
   },[nutCal,nutProt]);
 
-  // When nutDay changes, load that day's values (separate from save)
+  // When nutDay changes (via day-selector navigation only, not on mount), load that day's values
+  const nutDayMounted=useRef(false);
   useEffect(()=>{
-    if(!loaded.current)return;
+    if(!nutDayMounted.current){ nutDayMounted.current=true; return; } // skip the mount-triggered run
     const allNut=LS.get("ft_nut_all")||{};
     const dayNut=allNut[nutDay];
     setNutCal(dayNut?.cal?String(dayNut.cal):"");
