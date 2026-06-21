@@ -19,6 +19,11 @@
     input[type=number]::-webkit-inner-spin-button{opacity:.4}
     @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
     @keyframes slideUp{from{opacity:0;transform:translateY(40px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes confettiFall{
+      0%{transform:translateY(-20px) rotate(0deg);opacity:1}
+      100%{transform:translateY(420px) rotate(720deg);opacity:0}
+    }
+    .confetti-piece{position:absolute;top:0;will-change:transform,opacity;pointer-events:none}
     .fade{animation:fadeUp .28s ease both}
     .row-hover:hover{background:#13132a!important}
     .pu-btn:active{transform:scale(.95)}
@@ -431,6 +436,33 @@ function PaceGraph({runWeekActuals}){
   </div>;
 }
 
+// ── Confetti ──────────────────────────────────────────────────────────────────
+function Confetti(){
+  const colors=["#E67E22","#2ECC71","#3498DB","#E74C3C","#9B59B6","#F1C40F"];
+  const pieces=Array.from({length:50},(_,i)=>{
+    const left=Math.random()*100;
+    const delay=Math.random()*0.3;
+    const duration=1.4+Math.random()*1.2;
+    const size=5+Math.random()*5;
+    const color=colors[i%colors.length];
+    const rotate=Math.random()*360;
+    const isCircle=Math.random()>0.5;
+    return{id:i,left,delay,duration,size,color,rotate,isCircle};
+  });
+  return<div style={{position:"fixed",inset:0,overflow:"hidden",pointerEvents:"none",zIndex:200}}>
+    {pieces.map(p=>(
+      <div key={p.id} className="confetti-piece" style={{
+        left:`${p.left}%`,
+        width:p.size,height:p.size,
+        background:p.color,
+        borderRadius:p.isCircle?"50%":"2px",
+        animation:`confettiFall ${p.duration}s ease-in ${p.delay}s forwards`,
+        transform:`rotate(${p.rotate}deg)`,
+      }}/>
+    ))}
+  </div>;
+}
+
 // ── Main App ──────────────────────────────────────────────────────────────────
 function App(){
   const today=DAYS[new Date().getDay()];
@@ -446,6 +478,8 @@ function App(){
   const [graphMetric,setGraphMetric]=useState("pushups");
   const [saveStatus,setSaveStatus]=useState("");
   const [overlay,setOverlay]=useState(null);
+  const [showConfetti,setShowConfetti]=useState(false);
+  const wasDone=useRef(false);
   const [activeDateKey,setActiveDateKey]=useState(todayKey);
   const holdTimer=useRef(null);
   const loaded=useRef(false);
@@ -524,6 +558,16 @@ function App(){
   const doneCount=workout.exercises.filter(e=>checked[e.id]).length;
   const allDone=workout.isRest||(doneCount===workout.exercises.length&&(showPushups?puSets>=5:true));
 
+  useEffect(()=>{
+    if(allDone&&!wasDone.current&&!workout.isRest){
+      setShowConfetti(true);
+      const t=setTimeout(()=>setShowConfetti(false),2800);
+      wasDone.current=true;
+      return()=>clearTimeout(t);
+    }
+    if(!allDone) wasDone.current=false;
+  },[allDone]);
+
   const setActualFn=(wk,key,val)=>setActuals(p=>({...p,[wk]:{...(p[wk]||{}),[key]:val===""?undefined:parseFloat(val)}}));
   const getDiff=(wk,key)=>{
     const a=actuals[wk]?.[key];
@@ -599,6 +643,7 @@ function App(){
 
   return<div style={{minHeight:"100vh",background:"#0a0a12",fontFamily:"'IBM Plex Mono',monospace",color:"#e8e8f0"}}>
     {overlayEx&&<ExOverlay ex={overlayEx} color={workout.color} label={workout.label} repChecked={repChecked} onRepCheck={key=>setRepChecked(p=>({...p,[key]:!p[key]}))} onClose={()=>setOverlay(null)} onAllDone={markAllSetsDone} weekNum={currentWeek}/>}
+    {showConfetti&&<Confetti/>}
 
     {/* Header */}
     <div style={{position:"sticky",top:0,zIndex:10,background:"rgba(10,10,18,.97)",backdropFilter:"blur(12px)",borderBottom:"1px solid #1a1a2e",padding:"14px 16px 0"}}>
