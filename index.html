@@ -41,51 +41,51 @@ const { useState, useEffect, useRef } = React;
 const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
 const DAY_SHORT = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const CAL_GOAL = 3100, PROT_GOAL = 165;
-const PU_WEEK_REPS = [20,22,24,25,26,27,28,29,30,31,32,33];
-const PROGRAM_START = new Date("2026-06-21");
+const PU_WEEK_REPS = [20,22,24,25,26,27,28,29,30];
+const PROGRAM_START = new Date("2026-06-21"); // Week 1 starts here
 
 // Weight progressions: [wks1-3, wks5-7, wks9-11]
 // Run weeks (4,8,12) don't advance progression
 function getWeight(exKey, weekNum){
-  const phase = weekNum <= 4 ? 0 : weekNum <= 8 ? 1 : 2;
-  const weights = {
-    ohp:    ["25 lbs","30 lbs","35 lbs"],
-    fly:    null, // handled separately
-    squat:  ["25 lb dumbbells","35 lb dumbbells","45 lb dumbbells"],
-    bss:    ["Bodyweight","10 lb dumbbells","20 lb dumbbells"],
-    calf:   ["35 lbs","40 lbs","45 lbs"],
-    hcurl:  ["25 lbs","30 lbs","35 lbs"],
-    curl:   ["25 lbs","30 lbs","35 lbs"],
-    lat:    ["15 lbs","15 lbs","20 lbs"],
+  // Per-week weights for 9-week program
+  const weightsByWeek = {
+    ohp:   ["25 lbs","25 lbs","27.5 lbs","27.5 lbs","30 lbs","30 lbs","32.5 lbs","35 lbs","35 lbs"],
+    squat: ["25 lb dumbbells","25 lb dumbbells","30 lb dumbbells","30 lb dumbbells","35 lb dumbbells","35 lb dumbbells","40 lb dumbbells","40 lb dumbbells","45 lb dumbbells"],
+    bss:   ["Bodyweight","Bodyweight","10 lb dumbbells","10 lb dumbbells","15 lb dumbbells","15 lb dumbbells","20 lb dumbbells","20 lb dumbbells","25 lb dumbbells"],
+    calf:  ["35 lbs","35 lbs","40 lbs","40 lbs","42.5 lbs","42.5 lbs","45 lbs","45 lbs","50 lbs"],
+    hcurl: ["25 lbs","25 lbs","27.5 lbs","27.5 lbs","30 lbs","30 lbs","32.5 lbs","32.5 lbs","35 lbs"],
+    curl:  ["25 lbs","25 lbs","27.5 lbs","27.5 lbs","30 lbs","30 lbs","32.5 lbs","32.5 lbs","35 lbs"],
+    lat:   ["15 lbs","15 lbs","15 lbs","17.5 lbs","17.5 lbs","17.5 lbs","20 lbs","20 lbs","20 lbs"],
+    rdl:   ["30 lb dumbbells","30 lb dumbbells","35 lb dumbbells","35 lb dumbbells","40 lb dumbbells","40 lb dumbbells","42.5 lb dumbbells","45 lb dumbbells","45 lb dumbbells"],
+    slrdl: ["15 lb dumbbell","15 lb dumbbell","17.5 lb dumbbell","17.5 lb dumbbell","20 lb dumbbell","20 lb dumbbell","22.5 lb dumbbell","22.5 lb dumbbell","25 lb dumbbell"],
+    fly:   null, // handled separately
   };
+  const wkIdx = Math.min(8, Math.max(0, weekNum-1));
+  const weights = {};
+  Object.keys(weightsByWeek).forEach(k => { if(weightsByWeek[k]) weights[k] = weightsByWeek[k]; });
   if(exKey==="fly"){
     // Per-set progression: each set gets +15 lbs every strength week
-    // Returned as array [set1, set2, set3]
-    const flyBase=115;
-    const swIdx=weekNum<=4?0:weekNum<=8?1:weekNum<=12?2:2; // rough phase
-    // More precise: map weekNum to strength week index 0-8
-    const swMap={1:0,2:1,3:2,5:3,6:4,7:5,9:6,10:7,11:8};
-    const si=swMap[weekNum]??0;
-    const s1=flyBase+Math.floor(si/1)*15; // bumps every week
-    // Actually per spec: s1 bumps at sw2,5,8; s2 bumps at sw3,6,9; s3 bumps at sw4,7
+    // Per-set rolling progression, one bump per week
+    const si=Math.min(8,Math.max(0,weekNum-1));
     const flyWeights=[
-      [115,115,115], // sw1
-      [130,115,115], // sw2
-      [130,130,115], // sw3
-      [130,130,130], // sw4
-      [145,130,130], // sw5
-      [145,145,130], // sw6
-      [145,145,145], // sw7
-      [160,145,145], // sw8
-      [160,160,145], // sw9
+      [115,115,115], // wk1
+      [130,115,115], // wk2
+      [130,130,115], // wk3
+      [130,130,130], // wk4
+      [145,130,130], // wk5
+      [145,145,130], // wk6
+      [145,145,145], // wk7
+      [160,145,145], // wk8
+      [160,160,145], // wk9
     ];
-    return flyWeights[Math.min(8,swMap[weekNum]??0)];
+    return flyWeights[si];
   }
-  return weights[exKey]?.[phase] || null;
+  if(exKey==="fly") {} // handled below
+  else return weights[exKey] ? weightsByWeek[exKey][wkIdx] : null;
 }
 
 // Week type: 1-3=strength, 4=run, 5-7=strength, 8=run, 9-11=strength, 12=run
-const isRunWeek = w => w === 4 || w === 8 || w === 12;
+const isRunWeek = w => false; // No run weeks in this program
 
 // Run week distances by day index (0=Sun..6=Sat)
 const RUN_WEEK_DISTANCES = {0:"6k",1:"8k",2:null,3:"10k",4:"8k",5:null,6:"6k"};
@@ -104,21 +104,21 @@ const dateKey = (d) => (d||new Date()).toISOString().slice(0,10);
 function getCurrentWeek(){
   const now = new Date();
   if(now < PROGRAM_START) return 1;
-  return Math.min(12, Math.max(1, Math.floor((now - PROGRAM_START)/(7*24*60*60*1000))+1));
+  return Math.min(9, Math.max(1, Math.floor((now - PROGRAM_START)/(7*24*60*60*1000))+1));
 }
 
 // ── Goals ─────────────────────────────────────────────────────────────────────
 // Baselines from week 7: pushups:28, pullups:7, weight:152, legraises:23, dips:10, run5k:29min
-const STRENGTH_WEEKS = [1,2,3,5,6,7,9,10,11]; // week numbers that are strength weeks
-const STRENGTH_WEEK_IDX = w => STRENGTH_WEEKS.indexOf(w); // 0-8
+const STRENGTH_WEEKS = [1,2,3,4,5,6,7,8,9];
+const STRENGTH_WEEK_IDX = w => STRENGTH_WEEKS.indexOf(w);
 
 const GOALS = {
-  pushups:   [20,21,22,23,24,25,26,27,28,30],
-  pullups:   [5,5,6,6,6,7,7,8,8,8],
-  weight:    [145,145.3,145.6,145.9,146.2,146.5,146.8,147.1,147.4,148],
-  legraises: [20,22,24,26,28,30,32,34,36,38],
-  dips:      [8,9,9,10,11,11,12,13,14,15],
-  run5k:     [32,31.5,31,30.5,30,29.5,29,28.5,28,27], // minutes, lower=better
+  run5k:     [32,31,30,29,28,27,26,25,23],
+  pushups:   [28,29,30,31,32,33,34,36,38],
+  pullups:   [6,6,7,7,7,8,8,8,9],
+  weight:    [148,148.5,149,149.5,150,150.5,151,151.5,152],
+  legraises: [21,23,25,27,29,31,33,35,38],
+  dips:      [10,11,12,12,13,13,14,14,15],
 };
 
 // Get goal for a given week number (strength weeks only)
@@ -191,124 +191,98 @@ function getRunWeekWorkout(dayIdx){
 
 // ── Metrics for progress tab ──────────────────────────────────────────────────
 const METRICS = [
-  {key:"run5k",     label:"Run 5k",     unit:"min", color:"#3498DB", lowerIsBetter:true},
   {key:"pushups",   label:"Push-Ups",   unit:"reps",color:"#E67E22"},
   {key:"pullups",   label:"Pull-Ups",   unit:"reps",color:"#E74C3C"},
   {key:"weight",    label:"Weight",     unit:"lbs", color:"#2ECC71"},
   {key:"legraises", label:"Leg Raises", unit:"reps",color:"#9B59B6"},
   {key:"dips",      label:"Dips",       unit:"reps",color:"#1ABC9C"},
 ];
+// 5k tracked separately, not in main metrics grid
+const RUN5K_GOALS = [32,31,30,29,28,27,26,25,23];
 
 // ── Daily tips ────────────────────────────────────────────────────────────────
 // Tips indexed [weekNum][dayIdx] — 84 unique tips, one per day across all 12 weeks
 const DAILY_TIPS = {
-  1: [ // Week 1 — strength, baseline week
-    "Pull-ups today. Don't worry about hitting 5 clean reps yet — this is about establishing where you actually are, not where you want to be.",
-    "First Push day. 20 lb weights are the starting point. Focus on full range of motion over speed — you've got 11 more weeks to add load.",
-    "First 5k test. Just get a clean baseline. 32 minutes is the target — don't chase a faster number today, just run an honest, even effort.",
-    "Rest day. Your body doesn't know it's week 1 yet. Recovery from a fresh program start matters as much as recovery from week 11.",
-    "First Pull Max Day. Whatever you log today is your real floor. There's nowhere to go from here but up.",
-    "First Legs day. 15 lb dumbbells on squats. Focus on depth and control — the weight will climb, the form has to be right first.",
+  1: [
+    "Pull day. Pull-ups first while fresh. Don't chase 6 reps yet — establish where you actually are. Full dead hang at the bottom of each rep.",
+    "First Push day. 25 lb dumbbells, chest fly at 115. Focus on full range over speed — you've got 8 weeks to add load.",
+    "First posterior legs day. Romanian deadlifts are the key addition. Hinge at the hips, not the waist — feel the hamstring load at the bottom.",
+    "Rest day. Recovery from a fresh program start matters as much as recovery from week 9. Protect your sleep tonight.",
+    "First Pull Max Day. Whatever you log is your real floor. Test fresh, before curls fatigue your grip.",
+    "First quad legs day. 25 lb dumbbells on squats. Depth and control first — the weight climbs later, the form has to be right now.",
     "First Push Max Day. Log your push-up max before anything else gasses out your chest and shoulders.",
   ],
   2: [
-    "Pull-ups, week 2. If yesterday's max test felt humbling, that's normal — the neural pathway for pulling strengthens faster than the muscle itself.",
-    "Push day. Still 20 lb dumbbells this week. Don't rush the weight increase — clean reps at this load build the foundation for everything after.",
-    "5k day. Compare today's effort to last week only in how it feels, not the clock yet. One data point isn't a trend.",
-    "Rest day. If you're sore from week 1, that's adaptation working. Sleep and protein matter more than stretching it out.",
-    "Pull Max Day. One week of pull-up practice under your belt. Don't expect a jump yet — strength gains in week 2 are mostly neural, not muscular.",
-    "Legs day. Still 15 lb dumbbells. If squats felt manageable last week, resist adding weight — let the movement pattern solidify first.",
-    "Push Max Day. Test fresh. Compare today's number to last Saturday — even 1-2 more reps is real signal this early.",
+    "Pull day, week 2. If last week's max test felt humbling, that's normal — pulling strength builds faster than it feels.",
+    "Push day. Still 25 lb dumbbells this week. Clean reps at this load build the foundation for everything after.",
+    "Posterior legs. RDL form check: are you feeling it in your hamstrings or your lower back? Lower back means you're rounding. Flat back, soft knees.",
+    "Rest day. Soreness from week 1 is adaptation working. Sleep and protein matter more than stretching it out.",
+    "Pull Max Day. One week of practice in. Don't expect a jump yet — early gains are neural, not muscular.",
+    "Quad legs. Still 25 lb dumbbells. If squats felt manageable last week, let the movement pattern solidify before adding weight.",
+    "Push Max Day. Test fresh. Compare to last Saturday — even 1-2 more reps is real signal this early.",
   ],
   3: [
-    "Pull-ups, week 3. Last week of this weight phase before everything bumps up after Sunday's run week starts.",
-    "Push day, final week at 20 lbs. Next strength block (week 5) the dumbbells go up — make these last reps count.",
-    "5k day. You're forming a real baseline now — three data points start to show a trend, not just noise.",
-    "Rest day. Three weeks of consistent training is where most people either build a real habit or quietly start skipping days. Notice which one you're doing.",
-    "Pull Max Day, last of phase one. Whatever you hit today is your phase-one ceiling — week 5 onward is genuinely new territory.",
-    "Legs day, last week at 15 lbs. Bulgarian split squats should feel slightly more controlled than week 1 — that's real stability building.",
-    "Push Max Day. Final test before the run week. A good number today sets a strong baseline heading into the break from lifting.",
+    "Pull day, week 3. Weights bump up on the dumbbell work this week. Pull-ups stay bodyweight — focus on clean full reps.",
+    "Push day. OHP moves to 27.5 lbs, chest fly set 1 to 130. Expect the first set to feel noticeably harder.",
+    "Posterior legs. RDL to 35 lbs, single-leg RDL to 17.5. Single-leg work directly trains pistol squat stability — find a fixed point to stare at.",
+    "Rest day. Three weeks of consistent training is where a habit forms or quietly starts slipping. Notice which one you're doing.",
+    "Pull Max Day. Curls jump to 27.5 lbs. Your pull-up number should start creeping up as the volume accumulates.",
+    "Quad legs. Squats to 30 lbs, calf raises to 40. Bulgarian split squats add 10 lb dumbbells — they'll feel like a different exercise.",
+    "Push Max Day. Do the push-up test first, fresh. Compare to week 1 — the trend matters more than any single number.",
   ],
-  4: [ // Run week
-    "Run week begins — 6k. Easy effort only. This whole week is about volume and recovery, not speed. Let your legs adapt to a new stimulus.",
-    "8k today. You've never run this distance in this program before — go out conservative and see how your legs respond past the 6k mark.",
-    "Maintenance day. Pull-ups and push-ups only, nothing else. Your legs need this rest to handle Wednesday's 10k.",
-    "10k — the peak of the pyramid. Longest run of the block. Start slower than feels necessary; you'll thank yourself at 7k.",
-    "8k, descending side of the pyramid. Your legs have real fatigue now — that's the training effect, not a sign something's wrong.",
-    "Maintenance day. Last lifting touch before Saturday's final run. Keep it light, the volume isn't the point this week.",
-    "6k to close the run week. This should feel easier than Sunday's 6k despite the accumulated mileage — that's the adaptation showing up.",
+  4: [
+    "Pull day, week 4. Lateral raises bump to 17.5 today on Thursday, but pull work stays steady. Keep grinding the pull-ups.",
+    "Push day. Weights hold steady this week at 27.5 OHP. Second week at this load should feel more controlled.",
+    "Posterior legs. Single-leg RDL is one of the best pistol squat prep moves — the hip hinge and balance pattern are nearly identical.",
+    "Rest day. Nearly halfway. The program stops being novel around now — consistency is the only thing left to manage.",
+    "Pull Max Day. Lateral raises to 17.5 lbs. Test your pull-ups fresh before the curls and raises fatigue you.",
+    "Quad legs. Bulgarian split squats at 10 lbs, second week. Balance and control should be returning even with the load.",
+    "Push Max Day. Halfway benchmark. Pull up your week 1 push-up number — the gap should be real by now.",
   ],
-  5: [ // Phase 2 weights begin
-    "Pull-ups, week 5. First strength week back — and the first week of new weights for the dumbbell exercises. Curls and OHP step up today.",
-    "Push day. Dumbbells move to 25 lbs and chest fly to 80. Expect the first set or two to feel noticeably harder than last phase's last week.",
-    "5k day. Coming off a run week, your aerobic engine should feel sharper. Worth testing if the extra mileage translated to pace.",
-    "Rest day. You're past the one-month mark. The program stops being novel around now — consistency is the only thing left to manage.",
-    "Pull Max Day. First test since the weight bump on assisted sets. Don't be surprised if today's max dips slightly from new-stimulus fatigue.",
-    "Legs day. Squats move to 25 lb dumbbells, Bulgarian split squats add 10 lbs. The split squats specifically will feel like a different exercise.",
-    "Push Max Day. Test before the new chest fly weight tires you out. Compare to week 3's number — that's your real before/after.",
+  5: [
+    "Pull day, week 5. Past the halfway mark. Weights step up again this week across the dumbbell work.",
+    "Push day. OHP to 30 lbs, chest fly set 1 to 145. This is meaningful load now — brace your core, no back arch.",
+    "Posterior legs. RDL to 40 lbs. Focus on the slow lowering phase — that's where the hamstring strength is built.",
+    "Rest day. Second half of the program. What you build now is what you carry into the next block.",
+    "Pull Max Day. Curls to 30 lbs. Five weeks of pull volume — this is usually where the numbers start moving faster.",
+    "Quad legs. Squats to 35 lbs, calf raises to 42.5, Bulgarian split squats to 15 lbs. Everything's getting heavier — respect the warmup.",
+    "Push Max Day. Test fresh. Five weeks of data now — look at the trend line, not just today.",
   ],
   6: [
-    "Pull-ups, week 6. The new weights from last week should be settling in. Focus on hitting full sets rather than chasing extra reps.",
-    "Push day. Second week at the bumped weights. If last week's first set felt rough, this week should feel more controlled.",
-    "5k day. You're at the halfway point of the program. Worth a quick mental check — is the pace trending the direction you want?",
-    "Rest day. Halfway through 12 weeks. The second half is shorter on paper but often feels longer — stay locked into the routine.",
-    "Pull Max Day. Two weeks into the new resistance levels. This is usually where the strength catches up to the load.",
-    "Legs day. Split squats at 10 lbs, second week. Balance and control should be returning even with the added load.",
-    "Push Max Day. Six weeks of consistent testing. Pull up your week 1 number mentally — the gap is real, even if progress feels slow day to day.",
+    "Pull day, week 6. Weights hold this week. Focus on hitting full clean sets rather than chasing extra reps.",
+    "Push day. Second week at 30 lb OHP. If last week's first set felt rough, this week should feel more controlled.",
+    "Posterior legs. Your posterior chain has been quietly supporting everything — pull-ups, pistol squats, running. It's paying off.",
+    "Rest day. Three weeks left. Motivation often dips here — showing up even for rest is still showing up.",
+    "Pull Max Day. Two weeks at 30 lb curls. This is where strength usually catches up to the load.",
+    "Quad legs. Bulgarian split squats at 15 lbs, second week. If balance feels solid, pistol squats are getting closer.",
+    "Push Max Day. Six weeks of testing. Compare to week 1 — that gap is the whole program in one number.",
   ],
   7: [
-    "Pull-ups, week 7. Last strength week before the second run week. Push for a strong session — you'll be off lifting for a few days soon.",
-    "Push day, final week of this weight phase. Next bump comes after week 8's run week — make this week's reps count.",
-    "5k day. Last 5k test before the run week resets your legs. Good moment to see where your fitness actually sits.",
-    "Rest day. Seven weeks down. This is usually where motivation has a natural dip — showing up today even if it's just rest is still showing up.",
-    "Pull Max Day. Last max test of this phase. Compare to week 5 — two full weeks of the new load should show in the numbers.",
-    "Legs day, closing out this weight block. Pistol squat practice — check if depth and control have improved since week 1.",
-    "Push Max Day. Final test before run week 8. A strong number here is a good signal heading into a week without lifting.",
+    "Pull day, week 7. Weights bump again this week. Three weeks to go — push for strong sessions.",
+    "Push day. OHP to 32.5 lbs, chest fly set 1 to 145 across all sets soon. Heaviest pressing yet.",
+    "Posterior legs. RDL to 42.5 lbs, single-leg RDL to 22.5. The single-leg balance should feel far steadier than week 1.",
+    "Rest day. Seven weeks down. Recovery now protects what you've built — don't skip it to grind.",
+    "Pull Max Day. Curls to 32.5 lbs. Compare your pull-up max to week 1 — the improvement should be clear.",
+    "Quad legs. Squats to 40 lbs, calf raises to 45, Bulgarian split squats to 20 lbs. Check pistol squat depth today.",
+    "Push Max Day. Test fresh. You're 78% through — the numbers should show a clear climb from week 1.",
   ],
-  8: [ // Run week
-    "Run week 2 begins — 6k. You've done this distance and pattern before; it should feel more familiar than run week 4 did.",
-    "8k today. Compare effort to week 4's 8k if you can recall it — this is where cumulative training shows up in how runs feel, not just times.",
-    "Maintenance day. Pull-ups and push-ups, light effort. Two-thirds through the program — the finish line is closer than the start now.",
-    "10k — second time hitting this distance in the program. Should feel more controlled than week 4's version.",
-    "8k, descending. You're more experienced with this exact pyramid shape now — trust the pacing instincts you built last time.",
-    "Maintenance day. One more lifting touch before the week's final run. Keep it light.",
-    "6k to close run week 2. Push pace if it feels right — you have one more strength block after this to build on whatever you log today.",
+  8: [
+    "Pull day, week 8. Second to last week. Weights mostly hold. Make these pull-up sets count.",
+    "Push day. OHP to 35 lbs — the heaviest of the program. Full lockout, tight core, no arch.",
+    "Posterior legs. RDL to 45 lbs. Heaviest hinge of the program — controlled eccentric, drive the hips forward hard.",
+    "Rest day. Almost there. Two weeks of training left — the fitness is nearly locked in.",
+    "Pull Max Day. Curls to 32.5, second week. Your pull-up ceiling is roughly set now — maintenance from here.",
+    "Quad legs. Bulgarian split squats at 20 lbs, second week. Try an unassisted pistol attempt — even a wobbly one counts.",
+    "Push Max Day. Test fresh. One week left after this. Compare to week 7 — steady climb expected.",
   ],
-  9: [ // Phase 3 weights begin
-    "Pull-ups, week 9. Final strength block starts — and the last weight bump. Curls and OHP step up one more time.",
-    "Push day. Dumbbells to 30 lbs, chest fly to 90. This is the heaviest you'll lift in this 12-week cycle.",
-    "5k day. Three strength blocks of training behind you. This is a good week to see if pace has meaningfully separated from week 1.",
-    "Rest day. Final stretch of the program. What you do in these last weeks often determines what you carry forward after week 12.",
-    "Pull Max Day. New resistance levels, fresh test. Don't expect a personal best today — the adaptation period usually costs a rep or two short-term.",
-    "Legs day. Squats to 35 lbs, split squats to 20. The split squats at 20 lbs will be genuinely challenging — that's the point this late in the program.",
-    "Push Max Day. First test at the new chest fly weight. Expect today's number to reflect fresh-stimulus fatigue more than your true ceiling.",
-  ],
-  10: [
-    "Pull-ups, week 10. Two weeks left. The new weights from last week should start feeling less foreign today.",
-    "Push day. Second week at max program weights. If your form held up last week, today should feel slightly more controlled.",
-    "5k day. Look back at week 1's time. With nine weeks of training behind that number, the difference should be obvious on the clock.",
-    "Rest day. Ten weeks in. The habit is fully built by now — protect it through the final stretch rather than coasting.",
-    "Pull Max Day. Two weeks at the heaviest assisted load. This is usually where strength visibly catches up to resistance.",
-    "Legs day. Split squats at 20 lbs, second week. If balance feels solid here, pistol squats are closer than they were in week 1.",
-    "Push Max Day. Compare to week 7's number — that's a clean six-week-apart comparison with a full weight phase between them.",
-  ],
-  11: [
-    "Pull-ups, week 11. Final Sunday session of the program. Treat it like a real session, not a formality — you've got one strength week and one run week left.",
-    "Push day. Final week at program-max weight. This is the last scheduled increase you'll hit in this cycle.",
-    "5k day. Last 5k test of the 12-week program. Whatever you log today is the number this cycle produced — make it count.",
-    "Rest day. Second to last rest day. The program is basically locked in at this point — recovery now protects what you've built, doesn't add to it.",
-    "Pull Max Day. Final max test of the program. This is your real answer to '12 weeks of consistent pull training' — log it honestly.",
-    "Legs day, final session at full program weight. Check pistol squat depth one more time before the closing run week.",
-    "Push Max Day. Final push-up max test of the cycle. Compare to week 1's number — that gap is the whole program in one comparison.",
-  ],
-  12: [ // Final run week
-    "Final run week begins — 6k. Last time running this opening distance in the 12-week program. Should feel like the easiest 6k you've run yet.",
-    "8k today. By now this distance is routine. Notice how differently it feels compared to run week 4's version of the same run.",
-    "Maintenance day. Last lifting touch of the program. Light pull-ups and push-ups — nothing left to prove here, just stay consistent.",
-    "Final 10k — the last peak of the last pyramid. This is the longest run of the entire 12-week program. Run it with everything you've built.",
-    "8k, descending. Almost done. The fatigue you feel here is twelve weeks of accumulated work, not a sign of anything going wrong.",
-    "Maintenance day. One session left after this. Keep it light — you're not building anymore, you're closing out.",
-    "Final 6k of the program. Twelve weeks ago this distance might have felt hard. However it feels today, that's your answer.",
+  9: [
+    "Final Pull day. Last Sunday of the program. Treat it like a real session — leave a strong final pull-up number.",
+    "Final Push day. OHP holds at 35 lbs, chest fly tops out at 160/160/145. Heaviest pressing of the whole program.",
+    "Final posterior legs. RDL at 45 lbs, single-leg RDL at 25. The hamstring and balance work has been the quiet MVP of this block.",
+    "Rest day. Second to last day. The program is locked in — recovery now just protects the final tests.",
+    "Final Pull Max Day. This is your real answer to 9 weeks of pull training. Test fresh, log it honestly.",
+    "Final quad legs. Squats at 45 lbs, calf raises at 50, split squats at 25. Check pistol squat depth one last time.",
+    "Final Push Max Day. Last test of the program. Compare to week 1 — that gap is nine weeks of consistent work in one number.",
   ],
 };
 
@@ -560,13 +534,33 @@ function App(){
   },[]);
 
   // ── Save ─────────────────────────────────────────────────────────────────────
-  useEffect(()=>{if(!loaded.current)return;if(Object.keys(actuals).length===0)return;setSaveStatus("saving");const t=setTimeout(()=>{LS.set("ft_actuals",actuals);setSaveStatus("saved");setTimeout(()=>setSaveStatus(""),1800);},600);return()=>clearTimeout(t);},[actuals]);
-  useEffect(()=>{if(!loaded.current)return;LS.set("ft_runweek_actuals",runWeekActuals);},[runWeekActuals]);
-  useEffect(()=>{if(!loaded.current)return;LS.set("ft_daily_"+activeDateKey,{checked,repChecked,puSets});},[checked,repChecked,puSets,activeDateKey]);
+  // Use mount-skip refs so the save effects never fire on the same render the load effect ran in
+  const mountedActuals=useRef(false);
+  const mountedRunWeek=useRef(false);
+  const mountedDaily=useRef(false);
 
-  // Save nutrition — only when user actually changes values, not on nutDay change
   useEffect(()=>{
-    if(!loaded.current)return;
+    if(!mountedActuals.current){mountedActuals.current=true;return;}
+    if(Object.keys(actuals).length===0)return;
+    setSaveStatus("saving");
+    const t=setTimeout(()=>{LS.set("ft_actuals",actuals);setSaveStatus("saved");setTimeout(()=>setSaveStatus(""),1800);},600);
+    return()=>clearTimeout(t);
+  },[actuals]);
+
+  useEffect(()=>{
+    if(!mountedRunWeek.current){mountedRunWeek.current=true;return;}
+    LS.set("ft_runweek_actuals",runWeekActuals);
+  },[runWeekActuals]);
+
+  useEffect(()=>{
+    if(!mountedDaily.current){mountedDaily.current=true;return;}
+    LS.set("ft_daily_"+activeDateKey,{checked,repChecked,puSets});
+  },[checked,repChecked,puSets,activeDateKey]);
+
+  // Save nutrition — only when user actually changes values, not on mount or nutDay change
+  const mountedNut=useRef(false);
+  useEffect(()=>{
+    if(!mountedNut.current){mountedNut.current=true;return;}
     const cal=parseFloat(nutCal)||0, prot=parseFloat(nutProt)||0;
     const allNut=LS.get("ft_nut_all")||{};
     allNut[nutDay]={cal,prot};
@@ -689,7 +683,7 @@ function App(){
           <div style={{display:"flex",alignItems:"center",gap:8,fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:900,letterSpacing:3,color:"#fff"}}>
             <span style={{fontSize:20,filter:"drop-shadow(0 0 8px #E67E22)"}}>⚡</span>FITNESS TRACKER
           </div>
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,letterSpacing:4,color:"#333",marginTop:2,paddingLeft:28}}>12 WEEKS · {runWeek?"RUN WEEK":"STRENGTH WEEK"}</div>
+          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,letterSpacing:4,color:"#333",marginTop:2,paddingLeft:28}}>9 WEEKS</div>
         </div>
         <div style={{textAlign:"right"}}>
           <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:12,fontWeight:700,letterSpacing:3,color:"#E67E22"}}>{today.toUpperCase()}</div>
@@ -807,145 +801,34 @@ function App(){
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",background:"#0f0f1e",border:"1px solid #1e1e35",borderRadius:10,padding:"12px 16px",marginBottom:18}}>
           <button onClick={()=>setCurrentWeek(w=>Math.max(1,w-1))} style={{background:"#1e1e35",border:"none",borderRadius:6,color:"#e8e8f0",width:36,height:36,fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>‹</button>
           <div style={{textAlign:"center"}}>
-            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:900,letterSpacing:3,color:"#fff"}}>WEEK {currentWeek} <span style={{opacity:.4,fontSize:13,fontWeight:400}}>of 12</span></div>
+            <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:900,letterSpacing:3,color:"#fff"}}>WEEK {currentWeek} <span style={{opacity:.4,fontSize:13,fontWeight:400}}>of 9</span></div>
             <div style={{fontSize:9,letterSpacing:2,color:isRunWeek(currentWeek)?"#3498DB":"#E67E22",marginTop:2}}>{isRunWeek(currentWeek)?"RUN WEEK":"STRENGTH WEEK"}</div>
           </div>
-          <button onClick={()=>setCurrentWeek(w=>Math.min(12,w+1))} style={{background:"#1e1e35",border:"none",borderRadius:6,color:"#e8e8f0",width:36,height:36,fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>›</button>
+          <button onClick={()=>setCurrentWeek(w=>Math.min(9,w+1))} style={{background:"#1e1e35",border:"none",borderRadius:6,color:"#e8e8f0",width:36,height:36,fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>›</button>
         </div>
 
-        {isRunWeek(currentWeek)?<>
-          {/* RUN WEEK — daily time cards */}
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase",marginBottom:12}}>Week {currentWeek} Runs</div>
-          {/* Row 1: Sun 6k, Mon 8k */}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:10}}>
-            {[{dk:"sun",dist:"6k",label:"Sunday"},{dk:"mon",dist:"8k",label:"Monday"}].map(({dk,dist,label})=>{
-              const actual=runWeekActuals[currentWeek]?.[dk];
-              const diff=getRunDiff(currentWeek,dist,dk);
-              const goal=getRunWeekGoal(dist,runWeekIndex(currentWeek));
-              return<div key={dk} style={{background:"#0f0f1e",border:"1px solid #1e1e35",borderTop:"3px solid #3498DB",borderRadius:10,padding:14,display:"flex",flexDirection:"column",gap:6}}>
-                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:11,fontWeight:700,letterSpacing:2,color:"#666"}}>{label} — {dist}</div>
-                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:700,color:"#3498DB"}}>{goal}<span style={{fontSize:10,opacity:.5,marginLeft:3}}>min goal</span></div>
-                <input type="number" placeholder="Actual (min)" value={actual??""} step="0.1"
-                  onChange={e=>setRunTime(currentWeek,dk,e.target.value)}
-                  style={{background:"#14142a",border:"1px solid #2a2a4a",borderRadius:6,padding:"7px 10px",color:"#e8e8f0",fontFamily:"'IBM Plex Mono',monospace",fontSize:16,width:"100%",outline:"none"}}/>
-                <div style={{borderRadius:6,padding:"5px 10px",fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:700,textAlign:"center",color:timeDiffColor(diff),background:timeDiffBg(diff),border:`1px solid ${timeDiffBorder(diff)}`}}>{fmtTimeDiff(diff)}</div>
-              </div>;
-            })}
-          </div>
-          {/* Row 2: Wed 10k centered */}
-          {(()=>{const dk="wed",dist="10k",label="Wednesday",actual=runWeekActuals[currentWeek]?.wed,diff=getRunDiff(currentWeek,"10k","wed"),goal=getRunWeekGoal("10k",runWeekIndex(currentWeek));return<div style={{display:"flex",justifyContent:"center",marginBottom:10}}>
-            <div style={{background:"#0f0f1e",border:"1px solid #1e1e35",borderTop:"3px solid #3498DB",borderRadius:10,padding:14,display:"flex",flexDirection:"column",gap:6,width:"calc(50% - 5px)"}}>
-              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:11,fontWeight:700,letterSpacing:2,color:"#666"}}>{label} — {dist}</div>
-              <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:700,color:"#3498DB"}}>{goal}<span style={{fontSize:10,opacity:.5,marginLeft:3}}>min goal</span></div>
-              <input type="number" placeholder="Actual (min)" value={actual??""} step="0.1"
-                onChange={e=>setRunTime(currentWeek,"wed",e.target.value)}
-                style={{background:"#14142a",border:"1px solid #2a2a4a",borderRadius:6,padding:"7px 10px",color:"#e8e8f0",fontFamily:"'IBM Plex Mono',monospace",fontSize:16,width:"100%",outline:"none"}}/>
-              <div style={{borderRadius:6,padding:"5px 10px",fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:700,textAlign:"center",color:timeDiffColor(diff),background:timeDiffBg(diff),border:`1px solid ${timeDiffBorder(diff)}`}}>{fmtTimeDiff(diff)}</div>
-            </div>
-          </div>;})()} 
-          {/* Row 3: Thu 8k, Sat 6k */}
+          {/* STRENGTH WEEK — metric cards in 2x3 grid, 5k first */}
           <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:22}}>
-            {[{dk:"thu",dist:"8k",label:"Thursday"},{dk:"sat",dist:"6k",label:"Saturday"}].map(({dk,dist,label})=>{
-              const actual=runWeekActuals[currentWeek]?.[dk];
-              const diff=getRunDiff(currentWeek,dist,dk);
-              const goal=getRunWeekGoal(dist,runWeekIndex(currentWeek));
-              return<div key={dk} style={{background:"#0f0f1e",border:"1px solid #1e1e35",borderTop:"3px solid #3498DB",borderRadius:10,padding:14,display:"flex",flexDirection:"column",gap:6}}>
-                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:11,fontWeight:700,letterSpacing:2,color:"#666"}}>{label} — {dist}</div>
-                <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:700,color:"#3498DB"}}>{goal}<span style={{fontSize:10,opacity:.5,marginLeft:3}}>min goal</span></div>
-                <input type="number" placeholder="Actual (min)" value={actual??""} step="0.1"
-                  onChange={e=>setRunTime(currentWeek,dk,e.target.value)}
-                  style={{background:"#14142a",border:"1px solid #2a2a4a",borderRadius:6,padding:"7px 10px",color:"#e8e8f0",fontFamily:"'IBM Plex Mono',monospace",fontSize:16,width:"100%",outline:"none"}}/>
-                <div style={{borderRadius:6,padding:"5px 10px",fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:700,textAlign:"center",color:timeDiffColor(diff),background:timeDiffBg(diff),border:`1px solid ${timeDiffBorder(diff)}`}}>{fmtTimeDiff(diff)}</div>
-              </div>;
-            })}
-          </div>
-
-          {/* Run weeks table */}
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase",marginBottom:12}}>Run Weeks</div>
-          <div style={{overflowX:"auto",borderRadius:10,border:"1px solid #1e1e35",marginBottom:16}}>
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-              <thead><tr>
-                <th style={{padding:"10px 6px",background:"#0f0f1e",fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,fontWeight:700,letterSpacing:2,textAlign:"center",borderBottom:"1px solid #1e1e35",color:"#aaaaaa"}}>Wk</th>
-                {["6k Sun","8k Mon","10k Wed","8k Thu","6k Sat"].map(h=><th key={h} style={{padding:"10px 6px",background:"#0f0f1e",fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,fontWeight:700,letterSpacing:1,textAlign:"center",borderBottom:"1px solid #1e1e35",color:"#3498DB",whiteSpace:"nowrap"}}>{h}</th>)}
-              </tr></thead>
-              <tbody>{runWeeks.map(wk=>{
-                const rwa=runWeekActuals[wk]||{};
-                return<tr key={wk} className="row-hover" style={{background:wk===currentWeek?"#0f0f22":"transparent",cursor:"pointer"}} onClick={()=>setCurrentWeek(wk)}>
-                  <td style={{padding:"7px 6px",textAlign:"center",borderBottom:"1px solid #10101e",color:wk===currentWeek?"#E67E22":"#aaaaaa",fontWeight:wk===currentWeek?700:400}}>W{wk}</td>
-                  {[{dk:"sun",dist:"6k"},{dk:"mon",dist:"8k"},{dk:"wed",dist:"10k"},{dk:"thu",dist:"8k"},{dk:"sat",dist:"6k"}].map(({dk,dist})=>{
-                    const actual=rwa[dk];
-                    const diff=actual!==undefined?actual-getRunWeekGoal(dist,runWeekIndex(wk)):null;
-                    return<td key={dk} style={{padding:"7px 6px",textAlign:"center",borderBottom:"1px solid #10101e"}}>
-                      <div style={{fontSize:10,opacity:.4}}>{getRunWeekGoal(dist,runWeekIndex(wk))}</div>
-                      {actual!==undefined&&<div style={{fontSize:12,fontWeight:700,color:timeDiffColor(diff)}}>{fmtTimeDiff(diff)}</div>}
-                    </td>;
-                  })}
-                </tr>;
-              })}</tbody>
-            </table>
-          </div>
-
-          {/* Pace graph */}
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase",marginBottom:12}}>Pace Graph</div>
-          <PaceGraph runWeekActuals={runWeekActuals}/>
-
-          {/* Strength weeks table */}
-          <StrengthTable actuals={actuals} strengthWeeks={strengthWeeks} currentWeek={currentWeek} setCurrentWeek={setCurrentWeek} getDiff={getDiff} fmtDiff={fmtDiff} diffColor={diffColor} saveStatus={saveStatus}/>
-
-          {/* Progress chart */}
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase",marginBottom:12,marginTop:8}}>Progress Chart</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:14}}>
-            {METRICS.map(m=><button key={m.key} onClick={()=>setGraphMetric(m.key)} style={{padding:"8px 4px",borderRadius:8,border:`1px solid ${graphMetric===m.key?m.color:"#1e1e35"}`,background:graphMetric===m.key?m.color+"18":"#0f0f1e",color:graphMetric===m.key?m.color:"#666680",fontFamily:"'IBM Plex Mono',monospace",fontSize:10,fontWeight:600,cursor:"pointer",transition:"all .15s",display:"flex",flexDirection:"column",alignItems:"center",gap:3,boxShadow:graphMetric===m.key?`0 0 12px ${m.color}30`:"none"}}>
-              <span style={{fontSize:12}}>{m.label}</span>
-            </button>)}
-          </div>
-          {(()=>{
-            const m=METRICS.find(x=>x.key===graphMetric);
-            const swks=strengthWeeks;
-            const gv=swks.map(w=>getGoal(graphMetric,w)||0);
-            const av=swks.map(w=>actuals[w]?.[graphMetric]);
-            const hasA=av.some(v=>v!==undefined);
-            const all=[...gv,...av.filter(v=>v!==undefined)];
-            const minV=Math.min(...all)*0.92,maxV=Math.max(...all)*1.05;
-            const W=320,H=160,PL=36,PR=12,PT=12,PB=28,cW=W-PL-PR,cH=H-PT-PB;
-            const xOf=i=>PL+(i/(swks.length-1))*cW,yOf=v=>PT+cH-((v-minV)/(maxV-minV))*cH;
-            const gp=gv.map((v,i)=>`${i===0?"M":"L"}${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(" ");
-            const ap=av.map((v,i)=>v!==undefined?{x:xOf(i),y:yOf(v),v,i}:null).filter(Boolean);
-            const al=ap.length>1?ap.map((p,j)=>`${j===0?"M":"L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" "):null;
-            const curIdx=swks.indexOf(currentWeek);
-            return<div style={{background:"#0a0a16",borderRadius:12,border:"1px solid #1a1a2e",padding:"12px 8px 8px"}}>
-              <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",maxWidth:W,display:"block",margin:"0 auto"}}>
-                {Array.from({length:5},(_,i)=>{const v=minV+(maxV-minV)*(i/4),y=yOf(v);return<g key={i}><line x1={PL} y1={y} x2={W-PR} y2={y} stroke="#1a1a2e" strokeWidth="1"/><text x={PL-4} y={y+4} textAnchor="end" fill="#3a3a5a" fontSize="8" fontFamily="monospace">{v.toFixed(m.key==="run5k"||m.key==="weight"?1:0)}</text></g>;})}
-                {swks.map((w,i)=><text key={w} x={xOf(i)} y={H-6} textAnchor="middle" fill="#3a3a5a" fontSize="8" fontFamily="monospace">W{w}</text>)}
-                <path d={gp} fill="none" stroke={m.color} strokeWidth="1.5" strokeDasharray="4,3" opacity="0.45"/>
-                {gv.map((v,i)=><circle key={i} cx={xOf(i)} cy={yOf(v)} r="2.5" fill="#0a0a16" stroke={m.color} strokeWidth="1.5" opacity="0.5"/>)}
-                {al&&<path d={al} fill="none" stroke={m.color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>}
-                {ap.map(p=><g key={p.i}><circle cx={p.x} cy={p.y} r="4" fill={m.color} stroke="#0a0a16" strokeWidth="1.5"/><text x={p.x} y={p.y-8} textAnchor="middle" fill={m.color} fontSize="8" fontFamily="monospace" fontWeight="bold">{p.v.toFixed(m.key==="run5k"||m.key==="weight"?1:0)}</text></g>)}
-                {curIdx>=0&&<line x1={xOf(curIdx)} y1={PT} x2={xOf(curIdx)} y2={H-PB} stroke="#E67E22" strokeWidth="1" strokeDasharray="2,2" opacity="0.4"/>}
-              </svg>
-              <div style={{display:"flex",gap:16,justifyContent:"center",marginTop:6}}>
-                <div style={{display:"flex",alignItems:"center",gap:5,fontSize:10,color:"#666680"}}><svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" stroke={m.color} strokeWidth="1.5" strokeDasharray="4,3" opacity="0.5"/></svg>Goal</div>
-                <div style={{display:"flex",alignItems:"center",gap:5,fontSize:10,color:m.color}}><svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" stroke={m.color} strokeWidth="2.5"/></svg>Actual</div>
-              </div>
-              {!hasA&&<div style={{textAlign:"center",fontSize:10,color:"#55556a",marginTop:6}}>Log actuals to see your progress line</div>}
-            </div>;
-          })()}
-
-        </>:<>
-          {/* STRENGTH WEEK — metric cards */}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginBottom:22}}>
-            {METRICS.map(m=>{
-              const goal=getGoal(m.key,currentWeek);
+            {[{key:"run5k",label:"Run 5k",unit:"min",color:"#3498DB",lowerIsBetter:true},...METRICS].map(m=>{
+              const goal=m.key==="run5k"?RUN5K_GOALS[Math.min(8,currentWeek-1)]:getGoal(m.key,currentWeek);
               const actual=actuals[currentWeek]?.[m.key];
-              const diff=getDiff(currentWeek,m.key);
-              if(goal===null)return null;
+              let diff=null,faster=false;
+              if(actual!==undefined){
+                if(m.key==="run5k"){diff=actual-goal;faster=diff<0;}
+                else{diff=getDiff(currentWeek,m.key);}
+              }
+              if(goal===null||goal===undefined)return null;
+              const dColor=m.key==="run5k"?(diff===null?"#555":faster?"#2ECC71":"#E74C3C"):diffColor(diff,m.key);
+              const dBg=m.key==="run5k"?(diff===null?"#1a1a2a":faster?"#0d2a1a":"#2a0d0d"):diffBg(diff,m.key);
+              const dBorder=m.key==="run5k"?(diff===null?"#333":faster?"#2ECC71":"#E74C3C"):diffBorder(diff,m.key);
+              const dText=m.key==="run5k"?(diff===null?"—":`${diff>=0?"+":""}${diff.toFixed(1)}`):fmtDiff(diff,m.key);
               return<div key={m.key} style={{background:"#0f0f1e",border:"1px solid #1e1e35",borderTop:`3px solid ${m.color}`,borderRadius:10,padding:14,display:"flex",flexDirection:"column",gap:6}}>
                 <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:12,fontWeight:700,letterSpacing:2,color:"#666"}}>{m.label}</div>
                 <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:700,color:m.color}}>{goal}<span style={{fontSize:11,opacity:.5,marginLeft:4}}>{m.unit}</span></div>
                 <input type="number" placeholder={m.key==="weight"?"Morning wt":m.key==="run5k"?"Time (min)":"Actual"} value={actual??""} step={m.key==="run5k"||m.key==="weight"?"0.1":"1"}
                   onChange={e=>setActualFn(currentWeek,m.key,e.target.value)}
                   style={{background:"#14142a",border:"1px solid #2a2a4a",borderRadius:6,padding:"7px 10px",color:"#e8e8f0",fontFamily:"'IBM Plex Mono',monospace",fontSize:16,width:"100%",outline:"none"}}/>
-                <div style={{borderRadius:6,padding:"5px 10px",fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:700,letterSpacing:1,textAlign:"center",color:diffColor(diff,m.key),background:diffBg(diff,m.key),border:`1px solid ${diffBorder(diff,m.key)}`}}>{fmtDiff(diff,m.key)}{diff!==null&&<span style={{fontSize:10,marginLeft:3,opacity:.7}}>{m.unit}</span>}</div>
+                <div style={{borderRadius:6,padding:"5px 10px",fontFamily:"'Barlow Condensed',sans-serif",fontSize:18,fontWeight:700,letterSpacing:1,textAlign:"center",color:dColor,background:dBg,border:`1px solid ${dBorder}`}}>{dText}{diff!==null&&<span style={{fontSize:10,marginLeft:3,opacity:.7}}>{m.unit}</span>}</div>
               </div>;
             })}
           </div>
@@ -956,14 +839,15 @@ function App(){
           {/* Progress chart - moved above run weeks */}
           <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase",marginBottom:12}}>Progress Chart</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:14}}>
-            {METRICS.map(m=><button key={m.key} onClick={()=>setGraphMetric(m.key)} style={{padding:"8px 4px",borderRadius:8,border:`1px solid ${graphMetric===m.key?m.color:"#1e1e35"}`,background:graphMetric===m.key?m.color+"18":"#0f0f1e",color:graphMetric===m.key?m.color:"#666680",fontFamily:"'IBM Plex Mono',monospace",fontSize:10,fontWeight:600,cursor:"pointer",transition:"all .15s",display:"flex",flexDirection:"column",alignItems:"center",gap:3,boxShadow:graphMetric===m.key?`0 0 12px ${m.color}30`:"none"}}>
+            {[{key:"run5k",label:"Run 5k",unit:"min",color:"#3498DB",lowerIsBetter:true},...METRICS].map(m=><button key={m.key} onClick={()=>setGraphMetric(m.key)} style={{padding:"8px 4px",borderRadius:8,border:`1px solid ${graphMetric===m.key?m.color:"#1e1e35"}`,background:graphMetric===m.key?m.color+"18":"#0f0f1e",color:graphMetric===m.key?m.color:"#666680",fontFamily:"'IBM Plex Mono',monospace",fontSize:10,fontWeight:600,cursor:"pointer",transition:"all .15s",display:"flex",flexDirection:"column",alignItems:"center",gap:3,boxShadow:graphMetric===m.key?`0 0 12px ${m.color}30`:"none"}}>
               <span style={{fontSize:12}}>{m.label}</span>
             </button>)}
           </div>
           {(()=>{
-            const m=METRICS.find(x=>x.key===graphMetric);
+            const allChartMetrics=[{key:"run5k",label:"Run 5k",unit:"min",color:"#3498DB",lowerIsBetter:true},...METRICS];
+            const m=allChartMetrics.find(x=>x.key===graphMetric);
             const swks=strengthWeeks;
-            const gv=swks.map(w=>getGoal(graphMetric,w)||0);
+            const gv=swks.map(w=>graphMetric==="run5k"?RUN5K_GOALS[Math.min(8,w-1)]:(getGoal(graphMetric,w)||0));
             const av=swks.map(w=>actuals[w]?.[graphMetric]);
             const hasA=av.some(v=>v!==undefined);
             const all=[...gv,...av.filter(v=>v!==undefined)];
@@ -992,36 +876,6 @@ function App(){
             </div>;
           })()}
 
-          {/* Run weeks table */}
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase",marginBottom:12,marginTop:8}}>Run Weeks</div>
-          <div style={{overflowX:"auto",borderRadius:10,border:"1px solid #1e1e35",marginBottom:24}}>
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-              <thead><tr>
-                <th style={{padding:"10px 6px",background:"#0f0f1e",fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,fontWeight:700,letterSpacing:2,textAlign:"center",borderBottom:"1px solid #1e1e35",color:"#aaaaaa"}}>Wk</th>
-                {["6k Sun","8k Mon","10k Wed","8k Thu","6k Sat"].map(h=><th key={h} style={{padding:"10px 6px",background:"#0f0f1e",fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,fontWeight:700,letterSpacing:1,textAlign:"center",borderBottom:"1px solid #1e1e35",color:"#3498DB",whiteSpace:"nowrap"}}>{h}</th>)}
-              </tr></thead>
-              <tbody>{runWeeks.map(wk=>{
-                const rwa=runWeekActuals[wk]||{};
-                return<tr key={wk} className="row-hover" style={{background:"transparent",cursor:"pointer"}} onClick={()=>setCurrentWeek(wk)}>
-                  <td style={{padding:"7px 6px",textAlign:"center",borderBottom:"1px solid #10101e",color:"#aaaaaa"}}>W{wk}</td>
-                  {[{dk:"sun",dist:"6k"},{dk:"mon",dist:"8k"},{dk:"wed",dist:"10k"},{dk:"thu",dist:"8k"},{dk:"sat",dist:"6k"}].map(({dk,dist})=>{
-                    const actual=rwa[dk];
-                    const diff=actual!==undefined?actual-getRunWeekGoal(dist,runWeekIndex(wk)):null;
-                    return<td key={dk} style={{padding:"7px 6px",textAlign:"center",borderBottom:"1px solid #10101e"}}>
-                      <div style={{fontSize:10,opacity:.4}}>{getRunWeekGoal(dist,runWeekIndex(wk))}</div>
-                      {actual!==undefined&&<div style={{fontSize:12,fontWeight:700,color:timeDiffColor(diff)}}>{fmtTimeDiff(diff)}</div>}
-                    </td>;
-                  })}
-                </tr>;
-              })}</tbody>
-            </table>
-          </div>
-
-          {/* Pace graph */}
-          <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase",marginBottom:12}}>Pace Graph</div>
-          <PaceGraph runWeekActuals={runWeekActuals}/>
-
-        </>}
       </div>}
 
       {/* ══ NUTRITION TAB ══ */}
@@ -1081,12 +935,17 @@ function StrengthTable({actuals,strengthWeeks,currentWeek,setCurrentWeek,getDiff
       <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
         <thead><tr>
           <th style={{padding:"10px 6px",background:"#0f0f1e",fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,fontWeight:700,letterSpacing:2,textAlign:"center",borderBottom:"1px solid #1e1e35",color:"#aaaaaa"}}>Wk</th>
+          <th style={{padding:"10px 6px",background:"#0f0f1e",fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,fontWeight:700,letterSpacing:1,textAlign:"center",borderBottom:"1px solid #1e1e35",color:"#3498DB",whiteSpace:"nowrap"}}>5k</th>
           {METRICS.map(m=><th key={m.key} style={{padding:"10px 6px",background:"#0f0f1e",fontFamily:"'Barlow Condensed',sans-serif",fontSize:10,fontWeight:700,letterSpacing:1,textAlign:"center",borderBottom:"1px solid #1e1e35",color:m.color,whiteSpace:"nowrap"}}>
-            {m.key==="legraises"?"Legs":m.key==="pushups"?"Push":m.key==="pullups"?"Pull":m.key==="weight"?"Wt":m.key==="dips"?"Dips":"5k"}
+            {m.key==="legraises"?"Legs":m.key==="pushups"?"Push":m.key==="pullups"?"Pull":m.key==="weight"?"Wt":"Dips"}
           </th>)}
         </tr></thead>
         <tbody>{strengthWeeks.map(wk=><tr key={wk} className="row-hover" style={{background:wk===currentWeek?"#0f0f22":"transparent",cursor:"pointer"}} onClick={()=>setCurrentWeek(wk)}>
           <td style={{padding:"7px 6px",textAlign:"center",borderBottom:"1px solid #10101e",color:wk===currentWeek?"#E67E22":"#aaaaaa",fontWeight:wk===currentWeek?700:400}}>W{wk}</td>
+          <td style={{padding:"7px 6px",textAlign:"center",borderBottom:"1px solid #10101e"}}>
+            <div style={{fontSize:10,opacity:.4}}>{RUN5K_GOALS[Math.min(8,wk-1)]}</div>
+            {actuals[wk]?.run5k!==undefined&&(()=>{const d=actuals[wk].run5k-RUN5K_GOALS[Math.min(8,wk-1)];return<div style={{fontSize:12,fontWeight:700,color:d<=0?"#2ECC71":"#E74C3C"}}>{`${d>=0?"+":""}${d.toFixed(1)}`}</div>;})()}
+          </td>
           {METRICS.map(m=>{
             const diff=getDiff(wk,m.key),actual=actuals[wk]?.[m.key];
             return<td key={m.key} style={{padding:"7px 6px",textAlign:"center",borderBottom:"1px solid #10101e"}}>
