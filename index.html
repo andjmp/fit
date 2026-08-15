@@ -42,7 +42,7 @@ const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Satur
 const DAY_SHORT = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const CAL_GOAL = 3100, PROT_GOAL = 165;
 const PU_WEEK_REPS = [20,22,24,25,26,27,28,29,30];
-const PROGRAM_START = new Date("2026-06-21"); // Week 1 starts here
+const PROGRAM_START = new Date("2026-08-16"); // Week 1 starts here
 
 // Weight progressions: [wks1-3, wks5-7, wks9-11]
 // Run weeks (4,8,12) don't advance progression
@@ -113,12 +113,12 @@ const STRENGTH_WEEKS = [1,2,3,4,5,6,7,8,9];
 const STRENGTH_WEEK_IDX = w => STRENGTH_WEEKS.indexOf(w);
 
 const GOALS = {
-  run5k:     [32,31,30,29,28,27,26,25,23],
-  pushups:   [28,29,30,31,32,33,34,36,38],
-  pullups:   [6,6,7,7,7,8,8,8,9],
-  weight:    [148,148.5,149,149.5,150,150.5,151,151.5,152],
-  legraises: [21,23,25,27,29,31,33,35,38],
-  dips:      [10,11,12,12,13,13,14,14,15],
+  run5k:     [30,29,28,27,26,25,24,23,22],
+  pushups:   [25,26,28,29,30,32,34,36,38],
+  pullups:   [5,5,6,6,7,7,8,8,9],
+  weight:    [150,150.5,151,151.5,152,152.5,153,153.5,154],
+  legraises: [25,27,29,31,33,35,37,39,42],
+  dips:      [10,11,12,13,14,15,16,17,18],
 };
 
 // Get goal for a given week number (strength weeks only)
@@ -200,7 +200,7 @@ const METRICS = [
   {key:"dips",      label:"Dips",       unit:"reps",color:"#1ABC9C"},
 ];
 // 5k tracked separately, not in main metrics grid
-const RUN5K_GOALS = [32,31,30,29,28,27,26,25,23];
+const RUN5K_GOALS = [30,29,28,27,26,25,24,23,22];
 
 // ── Daily tips ────────────────────────────────────────────────────────────────
 // Tips indexed [weekNum][dayIdx] — 84 unique tips, one per day across all 12 weeks
@@ -804,7 +804,6 @@ function App(){
           <button onClick={()=>setCurrentWeek(w=>Math.max(1,w-1))} style={{background:"#1e1e35",border:"none",borderRadius:6,color:"#e8e8f0",width:36,height:36,fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>‹</button>
           <div style={{textAlign:"center"}}>
             <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:22,fontWeight:900,letterSpacing:3,color:"#fff"}}>WEEK {currentWeek} <span style={{opacity:.4,fontSize:13,fontWeight:400}}>of 9</span></div>
-            <div style={{fontSize:9,letterSpacing:2,color:isRunWeek(currentWeek)?"#3498DB":"#E67E22",marginTop:2}}>{isRunWeek(currentWeek)?"RUN WEEK":"STRENGTH WEEK"}</div>
           </div>
           <button onClick={()=>setCurrentWeek(w=>Math.min(9,w+1))} style={{background:"#1e1e35",border:"none",borderRadius:6,color:"#e8e8f0",width:36,height:36,fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>›</button>
         </div>
@@ -929,8 +928,7 @@ function App(){
 // ── Strength table extracted as component ─────────────────────────────────────
 function StrengthTable({actuals,strengthWeeks,currentWeek,setCurrentWeek,getDiff,fmtDiff,diffColor,saveStatus}){
   return<>
-    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-      <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:13,fontWeight:700,letterSpacing:3,color:"#55556a",textTransform:"uppercase"}}>Strength Weeks</div>
+    <div style={{display:"flex",justifyContent:"flex-end",alignItems:"center",marginBottom:8,minHeight:14}}>
       <div style={{fontSize:10,color:saveStatus==="saved"?"#2ECC71":"#55556a",transition:"color .3s",fontFamily:"'IBM Plex Mono',monospace"}}>{saveStatus==="saving"&&"saving"}{saveStatus==="saved"&&"saved"}</div>
     </div>
     <div style={{overflowX:"auto",borderRadius:10,border:"1px solid #1e1e35",marginBottom:8}}>
