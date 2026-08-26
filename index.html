@@ -305,11 +305,38 @@ function RestTimer({restStr,color}){
   const [state,setState]=useState("idle");
   const [elapsed,setElapsed]=useState(0);
   const iv=useRef(null);
-  const start=()=>{setState("running");setElapsed(0);iv.current=setInterval(()=>setElapsed(e=>{if(e+1>=total){clearInterval(iv.current);setState("done");return total;}return e+1;}),1000);};
-  const reset=()=>{clearInterval(iv.current);setState("idle");setElapsed(0);};
+  const endTime=useRef(null); // absolute timestamp when timer should finish
+
+  // Recompute elapsed from the real clock — survives app backgrounding
+  const tick=()=>{
+    if(endTime.current===null)return;
+    const remMs=endTime.current-Date.now();
+    if(remMs<=0){
+      setElapsed(total);setState("done");
+      clearInterval(iv.current);iv.current=null;
+    }else{
+      setElapsed(total-Math.ceil(remMs/1000));
+    }
+  };
+  const start=()=>{
+    setState("running");setElapsed(0);
+    endTime.current=Date.now()+total*1000;
+    clearInterval(iv.current);
+    iv.current=setInterval(tick,250);
+  };
+  const reset=()=>{clearInterval(iv.current);iv.current=null;endTime.current=null;setState("idle");setElapsed(0);};
+
+  // Resync when the app returns to foreground (iOS suspends timers while backgrounded)
+  useEffect(()=>{
+    const onVis=()=>{if(state==="running"&&!document.hidden)tick();};
+    document.addEventListener("visibilitychange",onVis);
+    window.addEventListener("focus",onVis);
+    return()=>{document.removeEventListener("visibilitychange",onVis);window.removeEventListener("focus",onVis);};
+  },[state,total]);
   useEffect(()=>()=>clearInterval(iv.current),[]);
+
   if(!total)return<div style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#0a0a18",borderRadius:8,padding:"10px 14px",marginBottom:14}}><span style={{fontSize:9,letterSpacing:2,color:"#444",fontWeight:600}}>REST</span><span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:700,color:"#666680"}}>—</span></div>;
-  const pct=elapsed/total,rem=total-elapsed,mins=Math.floor(rem/60),secs=rem%60,ts=mins>0?`${mins}:${secs.toString().padStart(2,"0")}`:rem+"s";
+  const pct=Math.min(1,elapsed/total),rem=Math.max(0,total-elapsed),mins=Math.floor(rem/60),secs=rem%60,ts=mins>0?`${mins}:${secs.toString().padStart(2,"0")}`:rem+"s";
   return<button onClick={state==="idle"?start:reset} style={{display:"flex",justifyContent:"space-between",alignItems:"center",background:"#141428",borderRadius:8,padding:"10px 14px",marginBottom:14,width:"100%",border:"none",cursor:"pointer",overflow:"hidden",position:"relative"}}>
     {state!=="idle"&&<div style={{position:"absolute",left:0,top:0,bottom:0,width:`${pct*100}%`,background:state==="done"?color:"#E67E22",transition:state==="running"?"width 1s linear":"none",borderRadius:8}}/>}
     <span style={{fontSize:9,letterSpacing:2,color:"#444",fontWeight:600,position:"relative",zIndex:1}}>REST</span>
