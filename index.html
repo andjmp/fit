@@ -98,7 +98,14 @@ const LS = {
   get(k){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):null; }catch(_){return null;} },
   set(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(_){} },
 };
-const dateKey = (d) => (d||new Date()).toISOString().slice(0,10);
+const dateKey = (d) => {
+  const dt = d || new Date();
+  // Use LOCAL date components, not UTC (toISOString converts to UTC and rolls over at the wrong time)
+  const y = dt.getFullYear();
+  const m = String(dt.getMonth()+1).padStart(2,"0");
+  const day = String(dt.getDate()).padStart(2,"0");
+  return `${y}-${m}-${day}`;
+};
 
 // ── Week calculation ──────────────────────────────────────────────────────────
 function getCurrentWeek(){
