@@ -42,7 +42,7 @@ const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Satur
 const DAY_SHORT = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const CAL_GOAL = 3100, PROT_GOAL = 165;
 const PU_WEEK_REPS = [20,22,24,25,26,27,28,29,30];
-const PROGRAM_START = new Date("2026-08-23"); // Week 1 starts here
+const PROGRAM_START = new Date("2026-10-04T00:00:00"); // Week 1 starts here (local midnight, Sun Oct 4)
 
 // Weight progressions: [wks1-3, wks5-7, wks9-11]
 // Run weeks (4,8,12) don't advance progression
@@ -125,7 +125,7 @@ const GOALS = {
   pullups:   [5,5,6,6,7,7,8,8,9],
   weight:    [150,150.5,151,151.5,152,152.5,153,153.5,154],
   legraises: [25,27,29,31,33,35,37,39,42],
-  dips:      [10,11,12,13,14,15,16,17,18],
+  dips:      [7,8,9,10,11,12,13,14,15],
 };
 
 // Get goal for a given week number (strength weeks only)
@@ -555,6 +555,7 @@ function App(){
 
   // ── Load ─────────────────────────────────────────────────────────────────────
   useEffect(()=>{
+    if(LS.get("ft_program_start")!=="2026-10-04"){ LS.set("ft_actuals",{}); LS.set("ft_runweek_actuals",{}); LS.set("ft_program_start","2026-10-04"); }
     const a=LS.get("ft_actuals"); if(a) setActuals(a);
     const rwa=LS.get("ft_runweek_actuals"); if(rwa) setRunWeekActuals(rwa);
     // Sync activeDateKey to actual today before loading
