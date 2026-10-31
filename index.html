@@ -42,7 +42,7 @@ const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Satur
 const DAY_SHORT = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const CAL_GOAL = 3100, PROT_GOAL = 165;
 const PU_WEEK_REPS = [20,22,24,25,26,27,28,29,30];
-const PROGRAM_START = new Date("2026-10-04T00:00:00"); // Week 1 starts here (local midnight, Sun Oct 4)
+const PROGRAM_START = new Date("2026-11-01T00:00:00"); // Week 1 starts here (local midnight, Sun Nov 1)
 
 // ── Adaptive progression ──────────────────────────────────────────────────────
 // The tables below are the PLAN (one column per week) and act as a ceiling.
@@ -607,7 +607,7 @@ function App(){
 
   // ── Load ─────────────────────────────────────────────────────────────────────
   useEffect(()=>{
-    if(LS.get("ft_program_start")!=="2026-10-04"){ LS.set("ft_actuals",{}); LS.set("ft_runweek_actuals",{}); LS.set("ft_program_start","2026-10-04"); }
+    if(LS.get("ft_program_start")!=="2026-11-01"){ LS.set("ft_actuals",{}); LS.set("ft_runweek_actuals",{}); LS.set("ft_program_start","2026-11-01"); }
     const a=LS.get("ft_actuals"); if(a) setActuals(a);
     const rwa=LS.get("ft_runweek_actuals"); if(rwa) setRunWeekActuals(rwa);
     // Sync activeDateKey to actual today before loading
