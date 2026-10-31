@@ -44,44 +44,97 @@ const CAL_GOAL = 3100, PROT_GOAL = 165;
 const PU_WEEK_REPS = [20,22,24,25,26,27,28,29,30];
 const PROGRAM_START = new Date("2026-10-04T00:00:00"); // Week 1 starts here (local midnight, Sun Oct 4)
 
-// Weight progressions: [wks1-3, wks5-7, wks9-11]
-// Run weeks (4,8,12) don't advance progression
-function getWeight(exKey, weekNum){
-  // Per-week weights for 9-week program
-  const weightsByWeek = {
-    ohp:   ["25 lbs","25 lbs","27.5 lbs","27.5 lbs","30 lbs","30 lbs","32.5 lbs","35 lbs","35 lbs"],
-    squat: ["25 lb dumbbells","25 lb dumbbells","30 lb dumbbells","30 lb dumbbells","35 lb dumbbells","35 lb dumbbells","40 lb dumbbells","40 lb dumbbells","45 lb dumbbells"],
-    bss:   ["Bodyweight","Bodyweight","10 lb dumbbells","10 lb dumbbells","15 lb dumbbells","15 lb dumbbells","20 lb dumbbells","20 lb dumbbells","25 lb dumbbells"],
-    calf:  ["35 lbs","35 lbs","40 lbs","40 lbs","42.5 lbs","42.5 lbs","45 lbs","45 lbs","50 lbs"],
-    hcurl: ["25 lbs","25 lbs","27.5 lbs","27.5 lbs","30 lbs","30 lbs","32.5 lbs","32.5 lbs","35 lbs"],
-    curl:  ["25 lbs","25 lbs","27.5 lbs","27.5 lbs","30 lbs","30 lbs","32.5 lbs","32.5 lbs","35 lbs"],
-    lat:   ["15 lbs","15 lbs","15 lbs","17.5 lbs","17.5 lbs","17.5 lbs","20 lbs","20 lbs","20 lbs"],
-    rdl:   ["30 lb dumbbells","30 lb dumbbells","35 lb dumbbells","35 lb dumbbells","40 lb dumbbells","40 lb dumbbells","42.5 lb dumbbells","45 lb dumbbells","45 lb dumbbells"],
-    slrdl: ["15 lb dumbbell","15 lb dumbbell","17.5 lb dumbbell","17.5 lb dumbbell","20 lb dumbbell","20 lb dumbbell","22.5 lb dumbbell","22.5 lb dumbbell","25 lb dumbbell"],
-    fly:   null, // handled separately
-  };
-  const wkIdx = Math.min(8, Math.max(0, weekNum-1));
-  const weights = {};
-  Object.keys(weightsByWeek).forEach(k => { if(weightsByWeek[k]) weights[k] = weightsByWeek[k]; });
-  if(exKey==="fly"){
-    // Per-set progression: each set gets +15 lbs every strength week
-    // Per-set rolling progression, one bump per week
-    const si=Math.min(8,Math.max(0,weekNum-1));
-    const flyWeights=[
-      [115,115,115], // wk1
-      [130,115,115], // wk2
-      [130,130,115], // wk3
-      [130,130,130], // wk4
-      [145,130,130], // wk5
-      [145,145,130], // wk6
-      [145,145,145], // wk7
-      [160,145,145], // wk8
-      [160,160,145], // wk9
-    ];
-    return flyWeights[si];
+// ── Adaptive progression ──────────────────────────────────────────────────────
+// The tables below are the PLAN (one column per week) and act as a ceiling.
+// A lift only steps up to its next planned weight after a week in which EVERY scheduled
+// session of that lift was completed (all sets checked, or the exercise checked off).
+// Steps you didn't earn are not lost: they stay owed and are paid out one per clean week.
+// Progress is recomputed from the saved daily logs, so nothing extra is stored.
+const WEIGHTS_BY_WEEK = {
+  ohp:   ["25 lbs","25 lbs","27.5 lbs","27.5 lbs","30 lbs","30 lbs","32.5 lbs","35 lbs","35 lbs"],
+  squat: ["25 lb dumbbells","25 lb dumbbells","30 lb dumbbells","30 lb dumbbells","35 lb dumbbells","35 lb dumbbells","40 lb dumbbells","40 lb dumbbells","45 lb dumbbells"],
+  bss:   ["Bodyweight","Bodyweight","10 lb dumbbells","10 lb dumbbells","15 lb dumbbells","15 lb dumbbells","20 lb dumbbells","20 lb dumbbells","25 lb dumbbells"],
+  calf:  ["35 lbs","35 lbs","40 lbs","40 lbs","42.5 lbs","42.5 lbs","45 lbs","45 lbs","50 lbs"],
+  hcurl: ["25 lbs","25 lbs","27.5 lbs","27.5 lbs","30 lbs","30 lbs","32.5 lbs","32.5 lbs","35 lbs"],
+  curl:  ["25 lbs","25 lbs","27.5 lbs","27.5 lbs","30 lbs","30 lbs","32.5 lbs","32.5 lbs","35 lbs"],
+  lat:   ["15 lbs","15 lbs","15 lbs","17.5 lbs","17.5 lbs","17.5 lbs","20 lbs","20 lbs","20 lbs"],
+  rdl:   ["30 lb dumbbells","30 lb dumbbells","35 lb dumbbells","35 lb dumbbells","40 lb dumbbells","40 lb dumbbells","42.5 lb dumbbells","45 lb dumbbells","45 lb dumbbells"],
+  slrdl: ["15 lb dumbbell","15 lb dumbbell","17.5 lb dumbbell","17.5 lb dumbbell","20 lb dumbbell","20 lb dumbbell","22.5 lb dumbbell","22.5 lb dumbbell","25 lb dumbbell"],
+};
+// Chest fly: per-set weights, one set bumped +15 per step (step n = plan week n+1)
+const FLY_BY_STEP = [
+  [115,115,115],[130,115,115],[130,130,115],[130,130,130],[145,130,130],
+  [145,145,130],[145,145,145],[160,145,145],[160,160,145],
+];
+const PU_CLEAN_FRACTION = 0.8; // daily push-up sets: 80% of the week's sets counts as a clean week
+
+// Calendar-day math (never millisecond math: DST would shift week boundaries by an hour)
+const dayNum = d => Math.floor(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate())/86400000);
+function weekOfDate(d){ return Math.min(9, Math.max(1, Math.floor((dayNum(d)-dayNum(PROGRAM_START))/7)+1)); }
+function weekDates(w){
+  const out=[];
+  for(let i=0;i<7;i++){ const d=new Date(PROGRAM_START); d.setDate(d.getDate()+(w-1)*7+i); out.push(d); }
+  return out;
+}
+
+// Planned "rung" for each week (counts how many planned steps up to that week)
+function planRungs(exKey){
+  if(exKey==="fly") return FLY_BY_STEP.map((_,i)=>i);
+  if(exKey==="pushup_daily") return PU_WEEK_REPS.map((_,i)=>i);
+  const t=WEIGHTS_BY_WEEK[exKey]; if(!t) return null;
+  let r=0; return t.map((v,i)=>{ if(i>0&&v!==t[i-1]) r++; return r; });
+}
+
+function exerciseDone(log,exKey){
+  if(!log) return false;
+  if(log.checked&&log.checked[exKey]) return true;
+  const d=EX[exKey];
+  return !!(d&&d.sets.length>0&&d.sets.every((_,si)=>log.repChecked&&log.repChecked[`${exKey}_s${si}`]));
+}
+function liftWeekClean(exKey,w){
+  for(const d of weekDates(w)){
+    const wk=STRENGTH_WORKOUTS[DAYS[d.getDay()]];
+    if(wk&&wk.exercises.some(e=>e.id===exKey)&&!exerciseDone(LS.get("ft_daily_"+dateKey(d)),exKey)) return false;
   }
-  if(exKey==="fly") {} // handled below
-  else return weights[exKey] ? weightsByWeek[exKey][wkIdx] : null;
+  return true;
+}
+function pushupWeekClean(w){
+  let done=0, possible=0;
+  for(const d of weekDates(w)){
+    const wk=STRENGTH_WORKOUTS[DAYS[d.getDay()]];
+    if(!wk||wk.isRest||wk.skipPushups) continue;
+    const log=LS.get("ft_daily_"+dateKey(d));
+    possible+=5; done+=Math.min(5,(log&&log.puSets)||0);
+  }
+  return possible===0||done>=Math.ceil(possible*PU_CLEAN_FRACTION);
+}
+
+let PROG_CACHE={};
+function resetProgressionCache(){ PROG_CACHE={}; }
+function progressionLevel(exKey,week){
+  const ck=exKey+":"+week;
+  if(ck in PROG_CACHE) return PROG_CACHE[ck];
+  const rungs=planRungs(exKey); if(!rungs) return 0;
+  let level=0, owed=0;
+  for(let w=2;w<=week;w++){
+    owed+=rungs[w-1]-rungs[w-2];
+    const clean=exKey==="pushup_daily"?pushupWeekClean(w-1):liftWeekClean(exKey,w-1);
+    if(owed>0&&clean){ level++; owed--; }
+  }
+  // only cache weeks that don't depend on the week still in progress
+  if(week<=weekOfDate(new Date())) PROG_CACHE[ck]=level;
+  return level;
+}
+function isHeldBack(exKey,week){
+  const r=planRungs(exKey); if(!r) return false;
+  return progressionLevel(exKey,week)<r[Math.min(8,Math.max(0,week-1))];
+}
+function getPushupReps(week){ return PU_WEEK_REPS[progressionLevel("pushup_daily",Math.min(9,Math.max(1,week)))]; }
+function getWeight(exKey, weekNum){
+  const week=Math.min(9,Math.max(1,weekNum));
+  if(exKey==="fly") return FLY_BY_STEP[progressionLevel("fly",week)];
+  const t=WEIGHTS_BY_WEEK[exKey]; if(!t) return null;
+  return t[planRungs(exKey).indexOf(progressionLevel(exKey,week))];
 }
 
 // Week type: 1-3=strength, 4=run, 5-7=strength, 8=run, 9-11=strength, 12=run
@@ -108,11 +161,7 @@ const dateKey = (d) => {
 };
 
 // ── Week calculation ──────────────────────────────────────────────────────────
-function getCurrentWeek(){
-  const now = new Date();
-  if(now < PROGRAM_START) return 1;
-  return Math.min(9, Math.max(1, Math.floor((now - PROGRAM_START)/(7*24*60*60*1000))+1));
-}
+function getCurrentWeek(){ return weekOfDate(new Date()); }
 
 // ── Goals ─────────────────────────────────────────────────────────────────────
 // Baselines from week 7: pushups:28, pullups:7, weight:152, legraises:23, dips:10, run5k:29min
@@ -231,7 +280,7 @@ const DAILY_TIPS = {
     "Push Max Day. Test fresh. Compare to last Saturday — even 1-2 more reps is real signal this early.",
   ],
   3: [
-    "Pull day, week 3. Weights bump up on the dumbbell work this week. Pull-ups stay bodyweight — focus on clean full reps.",
+    "Pull day, week 3. Dumbbell weights step up if you finished every set last week; a lift marked held stays put until you do. Pull-ups stay bodyweight — focus on clean full reps.",
     "Push day. OHP moves to 27.5 lbs, chest fly set 1 to 130. Expect the first set to feel noticeably harder.",
     "Posterior legs. RDL to 35 lbs, single-leg RDL to 17.5. Single-leg work directly trains pistol squat stability — find a fixed point to stare at.",
     "Rest day. Three weeks of consistent training is where a habit forms or quietly starts slipping. Notice which one you're doing.",
@@ -240,7 +289,7 @@ const DAILY_TIPS = {
     "Push Max Day. Do the push-up test first, fresh. Compare to week 1 — the trend matters more than any single number.",
   ],
   4: [
-    "Pull day, week 4. Lateral raises bump to 17.5 today on Thursday, but pull work stays steady. Keep grinding the pull-ups.",
+    "Pull day, week 4. Lateral raises step to 17.5 today if you earned it, but pull work stays steady. Keep grinding the pull-ups.",
     "Push day. Weights hold steady this week at 27.5 OHP. Second week at this load should feel more controlled.",
     "Posterior legs. Single-leg RDL is one of the best pistol squat prep moves — the hip hinge and balance pattern are nearly identical.",
     "Rest day. Nearly halfway. The program stops being novel around now — consistency is the only thing left to manage.",
@@ -249,12 +298,12 @@ const DAILY_TIPS = {
     "Push Max Day. Halfway benchmark. Pull up your week 1 push-up number — the gap should be real by now.",
   ],
   5: [
-    "Pull day, week 5. Past the halfway mark. Weights step up again this week across the dumbbell work.",
+    "Pull day, week 5. Past the halfway mark. Weights step up again this week on any lift where you finished every set last week.",
     "Push day. OHP to 30 lbs, chest fly set 1 to 145. This is meaningful load now — brace your core, no back arch.",
     "Posterior legs. RDL to 40 lbs. Focus on the slow lowering phase — that's where the hamstring strength is built.",
     "Rest day. Second half of the program. What you build now is what you carry into the next block.",
     "Pull Max Day. Curls to 30 lbs. Five weeks of pull volume — this is usually where the numbers start moving faster.",
-    "Quad legs. Squats to 35 lbs, calf raises to 42.5, Bulgarian split squats to 15 lbs. Everything's getting heavier — respect the warmup.",
+    "Quad legs. Squats, calf raises and Bulgarian split squats step up this week wherever you finished every set last week. Respect the warmup.",
     "Push Max Day. Test fresh. Five weeks of data now — look at the trend line, not just today.",
   ],
   6: [
@@ -267,7 +316,7 @@ const DAILY_TIPS = {
     "Push Max Day. Six weeks of testing. Compare to week 1 — that gap is the whole program in one number.",
   ],
   7: [
-    "Pull day, week 7. Weights bump again this week. Three weeks to go — push for strong sessions.",
+    "Pull day, week 7. Weights step up again this week where you earned it. Three weeks to go — push for strong sessions.",
     "Push day. OHP to 32.5 lbs, chest fly set 1 to 145 across all sets soon. Heaviest pressing yet.",
     "Posterior legs. RDL to 42.5 lbs, single-leg RDL to 22.5. The single-leg balance should feel far steadier than week 1.",
     "Rest day. Seven weeks down. Recovery now protects what you've built — don't skip it to grind.",
@@ -380,6 +429,7 @@ function ExOverlay({ex,color,label,repChecked,onRepCheck,onClose,onAllDone,weekN
             <span style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:16,fontWeight:700,color:"#F1C40F"}}>{w}</span>
           </div>;
         })()}
+        {isHeldBack(ex.id,weekNum)&&<div style={{fontSize:11,color:"#a07a20",background:"#14120a",border:"1px solid #2a2200",borderRadius:8,padding:"8px 12px",marginBottom:12,lineHeight:1.5}}>Held at this weight. Finish every set of every session this week to move up next week.</div>}
         <div style={{fontSize:12,color:"#aaaaaa",lineHeight:1.6,background:"#080810",borderRadius:8,padding:"10px 12px",marginBottom:14}}>{d.notes}</div>
         <RestTimer restStr={d.rest} color={color}/>
         {totalSets>0&&<div style={{marginBottom:14}}>
@@ -509,6 +559,7 @@ function Confetti(){
 function App(){
   const today=DAYS[new Date().getDay()];
   const dayIdx=new Date().getDay();
+  const trainingWeek=getCurrentWeek(); // the real week, independent of the week picked on the Progress tab
   const todayKey=useRef(dateKey()).current; // stable across renders
   const [tab,setTab]=useState("today");
   const [checked,setChecked]=useState({});
@@ -533,6 +584,7 @@ function App(){
       if(nowKey!==activeDateKey){
         // Save current day before switching
         LS.set("ft_daily_"+activeDateKey,{checked,repChecked,puSets});
+        resetProgressionCache();
         // Load new day
         setActiveDateKey(nowKey);
         const d=LS.get("ft_daily_"+nowKey);
@@ -621,7 +673,8 @@ function App(){
   const runWeek=isRunWeek(currentWeek);
   const workout=runWeek?getRunWeekWorkout(dayIdx):STRENGTH_WORKOUTS[today];
 
-  const puTarget=PU_WEEK_REPS[Math.min(currentWeek-1,11)];
+  const puTarget=getPushupReps(trainingWeek);
+  const puHeld=isHeldBack("pushup_daily",trainingWeek);
   const showPushups=runWeek?(workout.isMaintenance||false):(!workout.skipPushups&&!workout.isRest);
   const doneCount=workout.exercises.filter(e=>checked[e.id]).length;
   const allDone=workout.isRest||(doneCount===workout.exercises.length&&(showPushups?puSets>=5:true));
@@ -671,6 +724,8 @@ function App(){
 
   const overlayEx=overlay?workout.exercises.find(e=>e.id===overlay):null;
   const tomorrowDay=DAYS[(dayIdx+1)%7];
+  const tomorrowDate=new Date(); tomorrowDate.setDate(tomorrowDate.getDate()+1);
+  const tomorrowWeek=weekOfDate(tomorrowDate);
   const tomorrowWorkout=runWeek?getRunWeekWorkout((dayIdx+1)%7):STRENGTH_WORKOUTS[tomorrowDay];
 
   // Nutrition totals (parsed directly from inputs)
@@ -707,10 +762,10 @@ function App(){
   // Run weeks for run table
   const runWeeks=[4,8,12];
 
-  const tipText=getDailyTip(currentWeek,dayIdx);
+  const tipText=getDailyTip(trainingWeek,dayIdx);
 
   return<div style={{minHeight:"100vh",background:"#0a0a12",fontFamily:"'IBM Plex Mono',monospace",color:"#e8e8f0"}}>
-    {overlayEx&&<ExOverlay ex={overlayEx} color={workout.color} label={workout.label} repChecked={repChecked} onRepCheck={key=>setRepChecked(p=>({...p,[key]:!p[key]}))} onClose={()=>setOverlay(null)} onAllDone={markAllSetsDone} weekNum={currentWeek}/>}
+    {overlayEx&&<ExOverlay ex={overlayEx} color={workout.color} label={workout.label} repChecked={repChecked} onRepCheck={key=>setRepChecked(p=>({...p,[key]:!p[key]}))} onClose={()=>setOverlay(null)} onAllDone={markAllSetsDone} weekNum={trainingWeek}/>}
     {showConfetti&&<Confetti/>}
 
     {/* Header */}
@@ -779,7 +834,8 @@ function App(){
                   <div style={{fontSize:13,lineHeight:1.4,color:checked[ex.id]?"#55556a":"#c8c8d8",textDecoration:checked[ex.id]?"line-through":"none"}}>{ex.text}</div>
                   <div style={{display:"flex",gap:8,alignItems:"center",marginTop:2}}>
                     {d?.sets.length>0&&<span style={{fontSize:9,color:"#666680"}}>{d.sets.length}x{d.sets[0].r}</span>}
-                    {(()=>{const w=getWeight(ex.id,currentWeek)||d?.weight;const disp=Array.isArray(w)?w[0]+" lbs":w;return disp&&disp!=="—"&&disp!=="Bodyweight"?<span style={{fontSize:9,color:"#5a5020"}}>· {disp}</span>:null;})()}
+                    {(()=>{const w=getWeight(ex.id,trainingWeek)||d?.weight;const disp=Array.isArray(w)?w[0]+" lbs":w;return disp&&disp!=="—"&&disp!=="Bodyweight"?<span style={{fontSize:9,color:"#5a5020"}}>· {disp}</span>:null;})()}
+                    {isHeldBack(ex.id,trainingWeek)&&<span style={{fontSize:9,color:"#a07a20"}}>held</span>}
                     {setsTotal>0&&setsDone>0&&<span style={{fontSize:9,color:setsDone===setsTotal?"#2ECC71":"#4a6a4a"}}>{setsDone}/{setsTotal}</span>}
                   </div>
                 </div>
@@ -800,7 +856,7 @@ function App(){
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:14,gap:10}}>
               <div>
                 <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:17,fontWeight:700,letterSpacing:1,color:"#E67E22",marginBottom:3}}>Daily Push-Up Practice</div>
-                <div style={{fontSize:11,color:"#666"}}>{puTarget} reps per set · never to failure · Week {currentWeek}</div>
+                <div style={{fontSize:11,color:"#666"}}>{puTarget} reps per set · never to failure · Week {trainingWeek}{puHeld?" · held":""}</div>
               </div>
               <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:900,padding:"4px 12px",borderRadius:8,flexShrink:0,background:puSets>=5?"#0d2a1a":"#1a1a2e",border:`1px solid ${puSets>=5?"#2ECC71":"#2e2e4e"}`,color:puSets>=5?"#2ECC71":"#888"}}>{puSets}/5</div>
             </div>
@@ -814,7 +870,7 @@ function App(){
               <div style={{fontSize:11,color:"#666680"}}>{puSets===0?"Tap when you finish a set":puSets<5?`${5-puSets} to go`:"All 5 done"}</div>
               {puSets>0&&<button onClick={()=>setPuSets(0)} style={{background:"transparent",border:"1px solid #2e2e4e",borderRadius:5,color:"#666680",fontFamily:"'IBM Plex Mono',monospace",fontSize:10,padding:"3px 8px",cursor:"pointer"}}>Reset</button>}
             </div>
-            <div style={{marginTop:10,fontSize:11,color:"#666680",background:"#0a0a18",borderRadius:6,padding:"7px 10px"}}><span style={{color:"#E67E22",fontWeight:600}}>Week {currentWeek}:</span> {puTarget} reps x 5 sets <span style={{color:"#55556a"}}>· stop 3–4 short of failure</span></div>
+            <div style={{marginTop:10,fontSize:11,color:"#666680",background:"#0a0a18",borderRadius:6,padding:"7px 10px"}}><span style={{color:"#E67E22",fontWeight:600}}>Week {trainingWeek}:</span> {puTarget} reps x 5 sets <span style={{color:"#55556a"}}>· stop 3–4 short of failure</span></div>
           </div>}
         </>}
 
@@ -822,7 +878,7 @@ function App(){
         <div style={{background:"#0f0f1e",border:"1px solid #1e1e35",borderLeft:`3px solid ${tomorrowWorkout.color}`,borderRadius:12,padding:16,marginBottom:16}}>
           <div style={{fontSize:9,letterSpacing:2,color:"#666680",marginBottom:6,fontWeight:600}}>UP NEXT — {tomorrowDay.toUpperCase()}</div>
           <div style={{fontFamily:"'Barlow Condensed',sans-serif",fontSize:20,fontWeight:700,color:"#fff",marginBottom:tomorrowWorkout.exercises.length>0?8:0}}>{tomorrowWorkout.label}</div>
-          {tomorrowWorkout.exercises.map(ex=>{const d=EX[ex.id];return<div key={ex.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4}}><span style={{fontSize:12,color:"#aaaaaa"}}>{ex.text}</span>{(()=>{const w=getWeight(ex.id,currentWeek)||d?.weight;const disp=Array.isArray(w)?w[0]+" lbs":w;return disp&&disp!=="—"?<span style={{fontSize:10,color:"#F1C40F",opacity:.8}}>{disp}</span>:null;})()}</div>;})}
+          {tomorrowWorkout.exercises.map(ex=>{const d=EX[ex.id];return<div key={ex.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:4}}><span style={{fontSize:12,color:"#aaaaaa"}}>{ex.text}</span>{(()=>{const w=getWeight(ex.id,tomorrowWeek)||d?.weight;const disp=Array.isArray(w)?w[0]+" lbs":w;return disp&&disp!=="—"?<span style={{fontSize:10,color:"#F1C40F",opacity:.8}}>{disp}</span>:null;})()}</div>;})}
         </div>
 
         {/* Tip */}
